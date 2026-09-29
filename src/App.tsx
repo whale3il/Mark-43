@@ -384,6 +384,7 @@ export default function App() {
             setAuthMode('login');
             showToast('Session locked. Signed out successfully.');
           }}
+          theme={theme}
         />
 
         {/* Viewport Content Area */}
@@ -505,6 +506,7 @@ export default function App() {
                   onOpenTransfer={() => setActiveTab('transfers')}
                   onOpenNewVaultModal={() => setShowNewVaultModal(true)}
                   onSelectTransaction={(tx) => setSelectedTransaction(tx)}
+                  theme={theme}
                 />
               )}
 
@@ -524,6 +526,7 @@ export default function App() {
                   cards={cards}
                   onUpdateCard={handleUpdateCard}
                   onIssueNewCard={handleIssueNewCard}
+                  theme={theme}
                 />
               )}
 

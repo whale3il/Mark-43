@@ -22,13 +22,16 @@ interface CardsViewProps {
   cards: PaymentCard[];
   onUpdateCard: (updatedCard: PaymentCard) => void;
   onIssueNewCard: (card: PaymentCard) => void;
+  theme?: 'dark' | 'light';
 }
 
 export const CardsView: React.FC<CardsViewProps> = ({
   cards,
   onUpdateCard,
-  onIssueNewCard
+  onIssueNewCard,
+  theme = 'dark'
 }) => {
+  const isLight = theme === 'light';
   const [selectedCardId, setSelectedCardId] = useState<string>(cards[0]?.id || '');
   const [isFlipped, setIsFlipped] = useState(false);
   const [showFullNumber, setShowFullNumber] = useState(false);
@@ -156,7 +159,8 @@ export const CardsView: React.FC<CardsViewProps> = ({
         <div className="space-y-4 flex flex-col items-center">
           {/* The Physical / Virtual Card Container */}
           <div
-            className={`w-full max-w-[420px] aspect-[1.586] rounded-2xl relative p-6 transition-all duration-500 transform shadow-2xl overflow-hidden border border-neutral-700/60 ${
+            data-force-dark="true"
+            className={`w-full max-w-[420px] aspect-[1.586] rounded-2xl relative p-6 transition-all duration-500 transform shadow-2xl overflow-hidden border border-neutral-700/60 text-white ${
               currentCard.isFrozen ? 'opacity-70 saturate-50' : ''
             }`}
             style={{
@@ -178,7 +182,7 @@ export const CardsView: React.FC<CardsViewProps> = ({
               <div className="h-full flex flex-col justify-between text-neutral-100 select-none">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold tracking-widest uppercase font-sans text-neutral-200">
+                    <span className="text-sm font-bold tracking-widest uppercase font-sans text-white">
                       Aureus
                     </span>
                     <span className="text-[10px] font-mono text-emerald-400 uppercase tracking-widest">
@@ -196,20 +200,20 @@ export const CardsView: React.FC<CardsViewProps> = ({
 
                 {/* Card Number */}
                 <div>
-                  <div className="text-base sm:text-lg font-mono tracking-widest text-neutral-200 tabular-nums">
+                  <div className="text-base sm:text-lg font-mono tracking-widest text-white tabular-nums">
                     {showFullNumber ? currentCard.fullNumberRevealed : currentCard.fullNumberMasked}
                   </div>
 
-                  <div className="mt-3 flex items-center justify-between text-[11px] font-mono text-neutral-400 uppercase">
+                  <div className="mt-3 flex items-center justify-between text-[11px] font-mono text-neutral-300 uppercase">
                     <div>
-                      <div className="text-[8px] text-neutral-500">Cardholder</div>
-                      <div className="text-neutral-200 tracking-wider truncate max-w-[160px]">
+                      <div className="text-[8px] text-neutral-400">Cardholder</div>
+                      <div className="text-white tracking-wider truncate max-w-[160px]">
                         {currentCard.nameOnCard}
                       </div>
                     </div>
                     <div>
-                      <div className="text-[8px] text-neutral-500">Expires</div>
-                      <div className="text-neutral-200">{currentCard.expiry}</div>
+                      <div className="text-[8px] text-neutral-400">Expires</div>
+                      <div className="text-white">{currentCard.expiry}</div>
                     </div>
                   </div>
                 </div>

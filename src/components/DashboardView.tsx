@@ -34,6 +34,7 @@ interface DashboardViewProps {
   onSelectTransaction: (tx: Transaction) => void;
   onNavigateTab: (tab: any) => void;
   onPayBillQuick: (billId: string) => void;
+  theme?: 'dark' | 'light';
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -45,8 +46,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenTransfer,
   onSelectTransaction,
   onNavigateTab,
-  onPayBillQuick
+  onPayBillQuick,
+  theme = 'dark'
 }) => {
+  const isLight = theme === 'light';
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [txFilter, setTxFilter] = useState<'all' | 'inflow' | 'outflow'>('all');
@@ -97,32 +100,58 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
       {/* Top Banner: Total Portfolio Net Worth & Quick KPI strip */}
-      <div className="rounded-2xl border border-neutral-800 bg-gradient-to-b from-neutral-900/90 to-neutral-950 p-6 md:p-8 backdrop-blur-md relative overflow-hidden">
-        <div className="absolute top-0 right-0 -mt-8 -mr-8 w-64 h-64 rounded-full bg-emerald-500/5 blur-3xl pointer-events-none" />
+      <div
+        className={`rounded-2xl border p-6 md:p-8 backdrop-blur-md relative overflow-hidden transition-colors ${
+          isLight
+            ? 'border-slate-200 bg-gradient-to-b from-white to-slate-50/90 shadow-sm'
+            : 'border-neutral-800 bg-gradient-to-b from-neutral-900/90 to-neutral-950'
+        }`}
+      >
+        <div
+          className={`absolute top-0 right-0 -mt-8 -mr-8 w-64 h-64 rounded-full blur-3xl pointer-events-none ${
+            isLight ? 'bg-emerald-500/5' : 'bg-emerald-500/5'
+          }`}
+        />
 
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
           <div>
-            <div className="flex items-center gap-2 text-xs font-mono text-neutral-400 uppercase tracking-wider">
+            <div
+              className={`flex items-center gap-2 text-xs font-mono uppercase tracking-wider ${
+                isLight ? 'text-slate-500' : 'text-neutral-400'
+              }`}
+            >
               <span>Consolidated Private Net Worth</span>
-              <span className="text-neutral-600">·</span>
-              <span className="text-emerald-400 flex items-center gap-1 font-sans">
+              <span className={isLight ? 'text-slate-300' : 'text-neutral-600'}>·</span>
+              <span className="text-emerald-500 flex items-center gap-1 font-sans font-medium">
                 <TrendingUp className="w-3.5 h-3.5" /> +2.84% MTD
               </span>
             </div>
 
-            <div className="mt-2 text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight text-neutral-100 font-sans tabular-nums">
+            <div
+              className={`mt-2 text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight font-sans tabular-nums ${
+                isLight ? 'text-slate-900' : 'text-neutral-100'
+              }`}
+            >
               {formatAmount(totalNetWorth, currency)}
             </div>
 
-            <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-neutral-400">
+            <div
+              className={`mt-3 flex flex-wrap items-center gap-4 text-xs ${
+                isLight ? 'text-slate-500' : 'text-neutral-400'
+              }`}
+            >
               <div>
                 <span>Liquid Operating: </span>
-                <span className="font-mono text-neutral-200 tabular-nums">{formatAmount(liquidChecking, currency)}</span>
+                <span className={`font-mono tabular-nums font-semibold ${isLight ? 'text-slate-800' : 'text-neutral-200'}`}>
+                  {formatAmount(liquidChecking, currency)}
+                </span>
               </div>
-              <span className="text-neutral-700">·</span>
+              <span className={isLight ? 'text-slate-300' : 'text-neutral-700'}>·</span>
               <div>
                 <span>High-Yield Treasury Reserve: </span>
-                <span className="font-mono text-emerald-400 tabular-nums">{formatAmount(yieldVault, currency)} (4.85% APY)</span>
+                <span className="font-mono text-emerald-500 tabular-nums font-semibold">
+                  {formatAmount(yieldVault, currency)} (4.85% APY)
+                </span>
               </div>
             </div>
           </div>
@@ -138,29 +167,41 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </button>
             <button
               onClick={() => onNavigateTab('cards')}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-neutral-900 border border-neutral-800 text-neutral-200 text-xs font-medium hover:bg-neutral-850 hover:text-white transition-colors"
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs font-medium transition-colors ${
+                isLight
+                  ? 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-900 shadow-xs'
+                  : 'bg-neutral-900 border-neutral-800 text-neutral-200 hover:bg-neutral-850 hover:text-white'
+              }`}
             >
-              <CreditCard className="w-3.5 h-3.5 text-neutral-400" />
+              <CreditCard className={`w-3.5 h-3.5 ${isLight ? 'text-slate-500' : 'text-neutral-400'}`} />
               <span>Card Controls</span>
             </button>
             <button
               onClick={() => onNavigateTab('bills')}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-neutral-900 border border-neutral-800 text-neutral-200 text-xs font-medium hover:bg-neutral-850 hover:text-white transition-colors"
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs font-medium transition-colors ${
+                isLight
+                  ? 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-900 shadow-xs'
+                  : 'bg-neutral-900 border-neutral-800 text-neutral-200 hover:bg-neutral-850 hover:text-white'
+              }`}
             >
-              <Calendar className="w-3.5 h-3.5 text-neutral-400" />
+              <Calendar className={`w-3.5 h-3.5 ${isLight ? 'text-slate-500' : 'text-neutral-400'}`} />
               <span>Schedule Bill</span>
             </button>
           </div>
         </div>
       </div>
 
-      {/* Account Cards Carousel Grid */}
+      {/* Account Cards Carousel Grid - Small boxes displaying money */}
       <div>
         <div className="flex items-center justify-between mb-3 px-1">
-          <h2 className="text-sm font-semibold text-neutral-200 tracking-tight">Active Accounts & Vaults</h2>
+          <h2 className={`text-sm font-semibold tracking-tight ${isLight ? 'text-slate-900' : 'text-neutral-200'}`}>
+            Active Accounts & Vaults
+          </h2>
           <button
             onClick={() => onNavigateTab('accounts')}
-            className="text-xs text-neutral-400 hover:text-emerald-400 transition-colors flex items-center gap-1"
+            className={`text-xs transition-colors flex items-center gap-1 ${
+              isLight ? 'text-slate-500 hover:text-emerald-600' : 'text-neutral-400 hover:text-emerald-400'
+            }`}
           >
             Manage All Accounts <ArrowRight className="w-3 h-3" />
           </button>
@@ -170,34 +211,56 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           {accounts.map((acc) => (
             <div
               key={acc.id}
-              className="p-4 rounded-xl border border-neutral-800 bg-neutral-900/60 hover:border-neutral-700/80 transition-all flex flex-col justify-between group"
+              className={`p-4 rounded-xl border transition-all flex flex-col justify-between group ${
+                isLight
+                  ? 'border-slate-200 bg-white hover:border-slate-300 shadow-xs'
+                  : 'border-neutral-800 bg-neutral-900/60 hover:border-neutral-700/80'
+              }`}
             >
               <div>
-                <div className="flex items-center justify-between text-xs text-neutral-400">
-                  <span className="truncate max-w-[150px] font-medium text-neutral-300">{acc.name}</span>
+                <div className={`flex items-center justify-between text-xs ${isLight ? 'text-slate-500' : 'text-neutral-400'}`}>
+                  <span className={`truncate max-w-[150px] font-medium ${isLight ? 'text-slate-700' : 'text-neutral-300'}`}>
+                    {acc.name}
+                  </span>
                   {acc.interestRate && (
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    <span
+                      className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                        isLight
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                      }`}
+                    >
                       {acc.interestRate}% APY
                     </span>
                   )}
                 </div>
 
-                <div className="mt-3 text-xl font-bold tracking-tight text-neutral-100 font-sans tabular-nums">
+                <div
+                  className={`mt-3 text-xl font-bold tracking-tight font-sans tabular-nums ${
+                    isLight ? 'text-slate-900' : 'text-neutral-100'
+                  }`}
+                >
                   {formatAmount(acc.balance, acc.currency)}
                 </div>
               </div>
 
-              <div className="mt-4 pt-3 border-t border-neutral-800/80 flex items-center justify-between text-xs text-neutral-500 font-mono">
+              <div
+                className={`mt-4 pt-3 border-t flex items-center justify-between text-xs font-mono ${
+                  isLight ? 'border-slate-100 text-slate-400' : 'border-neutral-800/80 text-neutral-500'
+                }`}
+              >
                 <span>•• {acc.accountNumber.slice(-4)}</span>
                 <button
                   onClick={() => copyToClipboard(acc.accountNumber, acc.id)}
-                  className="flex items-center gap-1 text-[11px] text-neutral-400 hover:text-neutral-200 transition-colors"
+                  className={`flex items-center gap-1 text-[11px] transition-colors ${
+                    isLight ? 'text-slate-500 hover:text-slate-800' : 'text-neutral-400 hover:text-neutral-200'
+                  }`}
                   title="Copy Account Number"
                 >
                   {copiedId === acc.id ? (
                     <>
-                      <Check className="w-3 h-3 text-emerald-400" />
-                      <span className="text-emerald-400 text-[10px]">Copied</span>
+                      <Check className="w-3 h-3 text-emerald-500" />
+                      <span className="text-emerald-500 text-[10px]">Copied</span>
                     </>
                   ) : (
                     <>
@@ -215,19 +278,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* 2-Column Section: Financial Cashflow Chart & Upcoming Bills + Smart Insights */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left 2 Cols: Cashflow & Net Worth Chart */}
-        <div className="lg:col-span-2 rounded-2xl border border-neutral-800 bg-neutral-900/50 p-6 flex flex-col justify-between">
+        <div
+          className={`lg:col-span-2 rounded-2xl border p-6 flex flex-col justify-between transition-colors ${
+            isLight ? 'border-slate-200 bg-white shadow-xs text-slate-900' : 'border-neutral-800 bg-neutral-900/50 text-neutral-100'
+          }`}
+        >
           <div>
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-neutral-800/80">
+            <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b ${isLight ? 'border-slate-100' : 'border-neutral-800/80'}`}>
               <div>
-                <div className="text-sm font-semibold text-neutral-100">Monthly Cash Inflow vs Outflow</div>
-                <div className="text-xs text-neutral-400 mt-0.5">6-month treasury liquidity movements</div>
+                <div className={`text-sm font-semibold ${isLight ? 'text-slate-900' : 'text-neutral-100'}`}>
+                  Monthly Cash Inflow vs Outflow
+                </div>
+                <div className={`text-xs mt-0.5 ${isLight ? 'text-slate-500' : 'text-neutral-400'}`}>
+                  6-month treasury liquidity movements
+                </div>
               </div>
               <div className="flex items-center gap-3 text-xs font-mono">
-                <span className="flex items-center gap-1.5 text-emerald-400">
+                <span className="flex items-center gap-1.5 text-emerald-500 font-medium">
                   <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block" /> Inflow
                 </span>
-                <span className="flex items-center gap-1.5 text-neutral-400">
-                  <span className="w-2.5 h-2.5 rounded-sm bg-neutral-600 inline-block" /> Outflow
+                <span className={`flex items-center gap-1.5 ${isLight ? 'text-slate-500' : 'text-neutral-400'}`}>
+                  <span className={`w-2.5 h-2.5 rounded-sm inline-block ${isLight ? 'bg-slate-400' : 'bg-neutral-600'}`} /> Outflow
                 </span>
               </div>
             </div>
@@ -249,7 +320,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     {/* Hover Value Badge */}
                     <div
                       className={`text-[10px] font-mono transition-opacity ${
-                        isSelected ? 'opacity-100 text-emerald-400 font-semibold' : 'opacity-0 group-hover:opacity-100 text-neutral-400'
+                        isSelected
+                          ? 'opacity-100 text-emerald-500 font-semibold'
+                          : isLight
+                          ? 'opacity-0 group-hover:opacity-100 text-slate-500'
+                          : 'opacity-0 group-hover:opacity-100 text-neutral-400'
                       }`}
                     >
                       +${(item.net / 1000).toFixed(0)}k
@@ -261,7 +336,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       <div
                         style={{ height: `${incomeHeight}%` }}
                         className={`w-3.5 sm:w-5 rounded-t-md transition-all ${
-                          isSelected ? 'bg-emerald-400 shadow-lg shadow-emerald-950' : 'bg-emerald-500/80 group-hover:bg-emerald-400'
+                          isSelected ? 'bg-emerald-500 shadow-md' : 'bg-emerald-500/80 group-hover:bg-emerald-500'
                         }`}
                         title={`Inflow: $${item.income.toLocaleString()}`}
                       />
@@ -269,13 +344,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       <div
                         style={{ height: `${spendHeight}%` }}
                         className={`w-3.5 sm:w-5 rounded-t-md transition-all ${
-                          isSelected ? 'bg-neutral-500' : 'bg-neutral-700 group-hover:bg-neutral-600'
+                          isSelected
+                            ? isLight ? 'bg-slate-600' : 'bg-neutral-500'
+                            : isLight ? 'bg-slate-300 group-hover:bg-slate-400' : 'bg-neutral-700 group-hover:bg-neutral-600'
                         }`}
                         title={`Outflow: $${item.spend.toLocaleString()}`}
                       />
                     </div>
 
-                    <div className={`text-xs font-mono transition-colors ${isSelected ? 'text-neutral-100 font-bold' : 'text-neutral-500'}`}>
+                    <div className={`text-xs font-mono transition-colors ${
+                      isSelected
+                        ? isLight ? 'text-slate-900 font-bold' : 'text-neutral-100 font-bold'
+                        : isLight ? 'text-slate-400' : 'text-neutral-500'
+                    }`}>
                       {item.month}
                     </div>
                   </div>
@@ -286,18 +367,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           {/* Active Month Detail Strip */}
           {activeChartMonth !== null && (
-            <div className="mt-4 p-3 rounded-xl bg-neutral-950/70 border border-neutral-800 flex items-center justify-between text-xs">
-              <span className="text-neutral-400">
-                Selected: <strong className="text-neutral-200">{CASHFLOW_CHART_DATA[activeChartMonth].month}</strong>
+            <div
+              className={`mt-4 p-3 rounded-xl border flex items-center justify-between text-xs ${
+                isLight ? 'bg-slate-50 border-slate-200' : 'bg-neutral-950/70 border-neutral-800'
+              }`}
+            >
+              <span className={isLight ? 'text-slate-600' : 'text-neutral-400'}>
+                Selected: <strong className={isLight ? 'text-slate-900' : 'text-neutral-200'}>{CASHFLOW_CHART_DATA[activeChartMonth].month}</strong>
               </span>
               <div className="flex items-center gap-4 font-mono tabular-nums">
-                <span className="text-emerald-400">
+                <span className="text-emerald-500 font-semibold">
                   Inflow: ${CASHFLOW_CHART_DATA[activeChartMonth].income.toLocaleString()}
                 </span>
-                <span className="text-neutral-400">
+                <span className={isLight ? 'text-slate-500' : 'text-neutral-400'}>
                   Outflow: ${CASHFLOW_CHART_DATA[activeChartMonth].spend.toLocaleString()}
                 </span>
-                <span className="text-neutral-200">
+                <span className={`font-semibold ${isLight ? 'text-slate-800' : 'text-neutral-200'}`}>
                   Net Delta: +${CASHFLOW_CHART_DATA[activeChartMonth].net.toLocaleString()}
                 </span>
               </div>
@@ -308,12 +393,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {/* Right Col: Upcoming Payments & Private Wealth Insight */}
         <div className="space-y-6">
           {/* Upcoming Payments */}
-          <div className="rounded-2xl border border-neutral-800 bg-neutral-900/50 p-5">
+          <div
+            className={`rounded-2xl border p-5 transition-colors ${
+              isLight ? 'border-slate-200 bg-white shadow-xs' : 'border-neutral-800 bg-neutral-900/50'
+            }`}
+          >
             <div className="flex items-center justify-between mb-3">
-              <div className="text-xs font-semibold text-neutral-200">Upcoming Payments</div>
+              <div className={`text-xs font-semibold ${isLight ? 'text-slate-900' : 'text-neutral-200'}`}>Upcoming Payments</div>
               <button
                 onClick={() => onNavigateTab('bills')}
-                className="text-[11px] text-neutral-400 hover:text-emerald-400 transition-colors"
+                className={`text-[11px] transition-colors ${isLight ? 'text-slate-500 hover:text-emerald-600' : 'text-neutral-400 hover:text-emerald-400'}`}
               >
                 View all
               </button>
@@ -323,19 +412,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               {bills.slice(0, 3).map((bill) => (
                 <div
                   key={bill.id}
-                  className="p-2.5 rounded-lg border border-neutral-800/80 bg-neutral-900/60 flex items-center justify-between text-xs"
+                  className={`p-2.5 rounded-lg border flex items-center justify-between text-xs transition-colors ${
+                    isLight
+                      ? 'border-slate-200 bg-slate-50/80 hover:bg-slate-100'
+                      : 'border-neutral-800/80 bg-neutral-900/60 hover:bg-neutral-850/80'
+                  }`}
                 >
                   <div className="truncate mr-2">
-                    <div className="font-medium text-neutral-200 truncate">{bill.billerName}</div>
-                    <div className="text-[10px] text-neutral-500 font-mono">Due {bill.dueDate}</div>
+                    <div className={`font-medium truncate ${isLight ? 'text-slate-900' : 'text-neutral-200'}`}>{bill.billerName}</div>
+                    <div className={`text-[10px] font-mono ${isLight ? 'text-slate-400' : 'text-neutral-500'}`}>Due {bill.dueDate}</div>
                   </div>
                   <div className="text-right shrink-0">
-                    <div className="font-mono text-neutral-200 tabular-nums">
+                    <div className={`font-mono tabular-nums font-semibold ${isLight ? 'text-slate-900' : 'text-neutral-200'}`}>
                       {formatAmount(bill.amount, currency)}
                     </div>
                     <button
                       onClick={() => onPayBillQuick(bill.id)}
-                      className="mt-1 text-[10px] text-emerald-400 hover:text-emerald-300 font-medium"
+                      className="mt-1 text-[10px] text-emerald-500 hover:text-emerald-600 font-semibold"
                     >
                       Pay Now
                     </button>
@@ -346,17 +439,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           {/* Smart Insights & Yield Optimization Card */}
-          <div className="rounded-2xl border border-neutral-800 bg-neutral-900/60 p-5 relative overflow-hidden">
-            <div className="flex items-center gap-2 text-xs font-medium text-emerald-400 mb-2">
+          <div
+            className={`rounded-2xl border p-5 relative overflow-hidden transition-colors ${
+              isLight ? 'border-slate-200 bg-white shadow-xs' : 'border-neutral-800 bg-neutral-900/60'
+            }`}
+          >
+            <div className="flex items-center gap-2 text-xs font-semibold text-emerald-500 mb-2">
               <Sparkles className="w-3.5 h-3.5" />
               <span>Treasury Yield Optimization</span>
             </div>
-            <p className="text-xs text-neutral-300 leading-relaxed">
-              Your checking account currently holds $284,520. Sweeping $80,000 into the 4.85% APY Treasury Vault will generate approximately <strong>+$323.33/month</strong> in risk-free yield.
+            <p className={`text-xs leading-relaxed ${isLight ? 'text-slate-600' : 'text-neutral-300'}`}>
+              Your checking account currently holds $284,520. Sweeping $80,000 into the 4.85% APY Treasury Vault will generate approximately{' '}
+              <strong className={isLight ? 'text-slate-900' : 'text-white'}>+$323.33/month</strong> in risk-free yield.
             </p>
             <button
               onClick={onOpenTransfer}
-              className="mt-3 inline-flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 font-medium"
+              className="mt-3 inline-flex items-center gap-1.5 text-xs text-emerald-500 hover:text-emerald-600 font-semibold"
             >
               <span>Execute Yield Sweep</span>
               <ArrowRight className="w-3 h-3" />
@@ -366,31 +464,41 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* Recent Activity Table with Filters & Search */}
-      <div className="rounded-2xl border border-neutral-800 bg-neutral-900/50 p-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-neutral-800/80">
+      <div
+        className={`rounded-2xl border p-6 transition-colors ${
+          isLight ? 'border-slate-200 bg-white shadow-xs' : 'border-neutral-800 bg-neutral-900/50'
+        }`}
+      >
+        <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b ${isLight ? 'border-slate-100' : 'border-neutral-800/80'}`}>
           <div>
-            <h2 className="text-sm font-semibold text-neutral-100">Recent Transactions & Ledger</h2>
-            <p className="text-xs text-neutral-400 mt-0.5">Real-time settled and pending debits</p>
+            <h2 className={`text-sm font-semibold ${isLight ? 'text-slate-900' : 'text-neutral-100'}`}>Recent Transactions & Ledger</h2>
+            <p className={`text-xs mt-0.5 ${isLight ? 'text-slate-500' : 'text-neutral-400'}`}>Real-time settled and pending debits</p>
           </div>
 
           {/* Search & Filter Controls */}
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative">
-              <Search className="w-3.5 h-3.5 text-neutral-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <Search className={`w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 ${isLight ? 'text-slate-400' : 'text-neutral-500'}`} />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search transactions..."
-                className="pl-8 pr-3 py-1.5 rounded-lg bg-neutral-950 border border-neutral-800 text-xs text-neutral-200 placeholder-neutral-600 focus:outline-none focus:border-neutral-700 w-44 sm:w-56"
+                className={`pl-8 pr-3 py-1.5 rounded-lg border text-xs focus:outline-none w-44 sm:w-56 ${
+                  isLight
+                    ? 'border-slate-200 bg-slate-50 text-slate-900 placeholder-slate-400 focus:border-slate-300 focus:bg-white'
+                    : 'bg-neutral-950 border-neutral-800 text-neutral-200 placeholder-neutral-600 focus:border-neutral-700'
+                }`}
               />
             </div>
 
-            <div className="flex items-center p-0.5 rounded-lg bg-neutral-950 border border-neutral-800 text-xs">
+            <div className={`flex items-center p-0.5 rounded-lg border text-xs ${isLight ? 'bg-slate-100 border-slate-200' : 'bg-neutral-950 border-neutral-800'}`}>
               <button
                 onClick={() => setTxFilter('all')}
                 className={`px-2.5 py-1 rounded text-xs transition-colors ${
-                  txFilter === 'all' ? 'bg-neutral-800 text-neutral-100 font-medium' : 'text-neutral-400 hover:text-neutral-200'
+                  txFilter === 'all'
+                    ? isLight ? 'bg-white text-slate-900 font-semibold shadow-xs' : 'bg-neutral-800 text-neutral-100 font-medium'
+                    : isLight ? 'text-slate-500 hover:text-slate-800' : 'text-neutral-400 hover:text-neutral-200'
                 }`}
               >
                 All
@@ -398,7 +506,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <button
                 onClick={() => setTxFilter('inflow')}
                 className={`px-2.5 py-1 rounded text-xs transition-colors ${
-                  txFilter === 'inflow' ? 'bg-neutral-800 text-emerald-400 font-medium' : 'text-neutral-400 hover:text-neutral-200'
+                  txFilter === 'inflow'
+                    ? isLight ? 'bg-white text-emerald-600 font-semibold shadow-xs' : 'bg-neutral-800 text-emerald-400 font-medium'
+                    : isLight ? 'text-slate-500 hover:text-slate-800' : 'text-neutral-400 hover:text-neutral-200'
                 }`}
               >
                 Inflow
@@ -406,7 +516,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <button
                 onClick={() => setTxFilter('outflow')}
                 className={`px-2.5 py-1 rounded text-xs transition-colors ${
-                  txFilter === 'outflow' ? 'bg-neutral-800 text-neutral-100 font-medium' : 'text-neutral-400 hover:text-neutral-200'
+                  txFilter === 'outflow'
+                    ? isLight ? 'bg-white text-slate-900 font-semibold shadow-xs' : 'bg-neutral-800 text-neutral-100 font-medium'
+                    : isLight ? 'text-slate-500 hover:text-slate-800' : 'text-neutral-400 hover:text-neutral-200'
                 }`}
               >
                 Outflow
@@ -419,7 +531,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="mt-4 overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead>
-              <tr className="border-b border-neutral-800/80 text-neutral-500 font-mono uppercase text-[10px] tracking-wider">
+              <tr className={`border-b font-mono uppercase text-[10px] tracking-wider ${isLight ? 'border-slate-100 text-slate-400' : 'border-neutral-800/80 text-neutral-500'}`}>
                 <th className="pb-3 font-medium">Merchant / Destination</th>
                 <th className="pb-3 font-medium">Category</th>
                 <th className="pb-3 font-medium">Payment Method</th>
@@ -428,10 +540,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <th className="pb-3 font-medium text-right">Status</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-neutral-800/50">
+            <tbody className={`divide-y ${isLight ? 'divide-slate-100' : 'divide-neutral-800/50'}`}>
               {filteredTransactions.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-neutral-500">
+                  <td colSpan={6} className={`py-8 text-center ${isLight ? 'text-slate-400' : 'text-neutral-500'}`}>
                     No transactions match the selected filter criteria.
                   </td>
                 </tr>
@@ -442,30 +554,36 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <tr
                       key={tx.id}
                       onClick={() => onSelectTransaction(tx)}
-                      className="hover:bg-neutral-850/50 cursor-pointer transition-colors group"
+                      className={`cursor-pointer transition-colors group ${
+                        isLight ? 'hover:bg-slate-50/80' : 'hover:bg-neutral-850/50'
+                      }`}
                     >
                       <td className="py-3.5 pr-4">
                         <div className="flex items-center gap-3">
-                          <div className="p-2 rounded-lg bg-neutral-950 border border-neutral-800 group-hover:border-neutral-700 transition-colors shrink-0">
+                          <div
+                            className={`p-2 rounded-lg border shrink-0 transition-colors ${
+                              isLight ? 'bg-slate-100 border-slate-200 group-hover:border-slate-300' : 'bg-neutral-950 border-neutral-800 group-hover:border-neutral-700'
+                            }`}
+                          >
                             {getCategoryIcon(tx.category)}
                           </div>
                           <div>
-                            <div className="font-medium text-neutral-200 group-hover:text-emerald-400 transition-colors">
+                            <div className={`font-medium transition-colors ${isLight ? 'text-slate-900 group-hover:text-emerald-600' : 'text-neutral-200 group-hover:text-emerald-400'}`}>
                               {tx.merchant}
                             </div>
-                            <div className="text-[10px] text-neutral-500 font-mono">{tx.referenceNumber}</div>
+                            <div className={`text-[10px] font-mono ${isLight ? 'text-slate-400' : 'text-neutral-500'}`}>{tx.referenceNumber}</div>
                           </div>
                         </div>
                       </td>
-                      <td className="py-3.5 pr-4 text-neutral-400 whitespace-nowrap">{tx.category}</td>
-                      <td className="py-3.5 pr-4 text-neutral-400 font-mono text-[11px] whitespace-nowrap">
+                      <td className={`py-3.5 pr-4 whitespace-nowrap ${isLight ? 'text-slate-500' : 'text-neutral-400'}`}>{tx.category}</td>
+                      <td className={`py-3.5 pr-4 font-mono text-[11px] whitespace-nowrap ${isLight ? 'text-slate-500' : 'text-neutral-400'}`}>
                         {tx.paymentMethod}
                       </td>
-                      <td className="py-3.5 pr-4 text-neutral-400 font-mono text-[11px] whitespace-nowrap">
-                        {tx.date} <span className="text-neutral-600">·</span> {tx.time}
+                      <td className={`py-3.5 pr-4 font-mono text-[11px] whitespace-nowrap ${isLight ? 'text-slate-500' : 'text-neutral-400'}`}>
+                        {tx.date} <span className={isLight ? 'text-slate-300' : 'text-neutral-600'}>·</span> {tx.time}
                       </td>
                       <td className="py-3.5 pr-4 text-right font-mono font-medium whitespace-nowrap tabular-nums">
-                        <span className={isInflow ? 'text-emerald-400' : 'text-neutral-200'}>
+                        <span className={isInflow ? 'text-emerald-500 font-semibold' : isLight ? 'text-slate-900 font-semibold' : 'text-neutral-200'}>
                           {isInflow ? '+' : ''}{formatAmount(tx.amount, tx.currency)}
                         </span>
                       </td>
@@ -473,8 +591,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         <span
                           className={`text-[10px] font-mono px-2 py-0.5 rounded capitalize ${
                             tx.status === 'settled'
-                              ? 'bg-neutral-900 text-neutral-400 border border-neutral-800'
-                              : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                              ? isLight
+                                ? 'bg-slate-100 text-slate-700 border border-slate-200'
+                                : 'bg-neutral-900 text-neutral-400 border border-neutral-800'
+                              : 'bg-amber-500/10 text-amber-500 border border-amber-500/20'
                           }`}
                         >
                           {tx.status}

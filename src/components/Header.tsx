@@ -84,20 +84,26 @@ export const Header: React.FC<HeaderProps> = ({
 
   const filteredNotifs = notifications.filter(n => notifFilter === 'all' || !n.read);
 
+  const isLight = theme === 'light';
+
   return (
-    <header className="sticky top-0 z-30 flex h-16 w-full shrink-0 items-center justify-between border-b border-neutral-800/80 bg-neutral-950/90 px-4 md:px-8 backdrop-blur-md transition-colors">
+    <header className={`sticky top-0 z-30 flex h-16 w-full shrink-0 items-center justify-between border-b px-4 md:px-8 backdrop-blur-md transition-colors ${
+      isLight ? 'border-slate-200 bg-white/95 text-slate-900 shadow-2xs' : 'border-neutral-800/80 bg-neutral-950/90 text-neutral-100'
+    }`}>
       {/* Brand & Wordmark */}
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-neutral-900 border border-neutral-800 shadow-inner">
-            <span className="text-base font-bold tracking-wider text-emerald-400 font-mono">AV</span>
+          <div className={`flex h-9 w-9 items-center justify-center rounded-lg border shadow-inner ${
+            isLight ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-neutral-900 border-neutral-800 text-emerald-400'
+          }`}>
+            <span className="text-base font-bold tracking-wider font-mono">AV</span>
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-base font-semibold tracking-tight text-neutral-100 font-sans">
+              <span className={`text-base font-semibold tracking-tight font-sans ${isLight ? 'text-slate-900' : 'text-neutral-100'}`}>
                 Aureus Wealth
               </span>
-              <span className="text-[11px] font-medium tracking-wider text-neutral-500 uppercase">
+              <span className={`text-[11px] font-medium tracking-wider uppercase ${isLight ? 'text-slate-500' : 'text-neutral-500'}`}>
                 Private Bank
               </span>
             </div>
@@ -105,14 +111,20 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Currency Switcher */}
-        <div className="hidden lg:flex items-center gap-1 p-0.5 rounded-md bg-neutral-900/90 border border-neutral-800 text-xs">
+        <div className={`hidden lg:flex items-center gap-1 p-0.5 rounded-md border text-xs ${
+          isLight ? 'bg-slate-100 border-slate-200 text-slate-600' : 'bg-neutral-900/90 border-neutral-800 text-neutral-400'
+        }`}>
           {(['USD', 'EUR', 'GBP', 'CHF', 'NGN'] as CurrencyCode[]).map((curr) => (
             <button
               key={curr}
               onClick={() => setCurrency(curr)}
               className={`px-2 py-1 rounded text-xs font-mono transition-colors ${
                 currency === curr
-                  ? 'bg-neutral-800 text-neutral-100 font-medium'
+                  ? isLight
+                    ? 'bg-white text-slate-900 font-semibold shadow-2xs'
+                    : 'bg-neutral-800 text-neutral-100 font-medium'
+                  : isLight
+                  ? 'text-slate-600 hover:text-slate-900'
                   : 'text-neutral-400 hover:text-neutral-200'
               }`}
             >

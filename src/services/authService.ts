@@ -184,10 +184,7 @@ export class AuthService {
       };
     }
 
-    // Generate initial bank clearing account
-    const bank = SUPPORTED_NIGERIAN_CLEARING_BANKS[0]; // Aureus Bank 090
-    const { nuban, formatted } = generateNigerianNuban(bank.code);
-
+    // In the former design, the user gets their full wealth accounts from INITIAL_ACCOUNTS
     const newUser: AuthUser = {
       id: `usr-${Date.now()}`,
       firstName: sanitizedPayload.firstName,
@@ -196,53 +193,35 @@ export class AuthService {
       name: `${sanitizedPayload.firstName} ${sanitizedPayload.lastName}`,
       email: sanitizedPayload.email,
       phone: sanitizedPayload.phone,
-      title: 'Private Wealth Partner',
-      clientTier: 'Aureus Sovereign Private Client',
+      title: USER_PROFILE.title,
+      clientTier: USER_PROFILE.clientTier,
       kycLevel: 'Tier 3 (BVN & ID Verified)',
-      hasTransactionPin: false,
-      primaryAccountNumber: formatted,
-      accountNumberMasked: `•••• ${nuban.slice(-4)}`,
+      hasTransactionPin: true,
+      pinMasked: '••••',
+      primaryAccountNumber: '8940 3120 4821',
+      accountNumberMasked: USER_PROFILE.accountNumberMasked,
       memberSince: new Date().getFullYear().toString(),
-      avatarUrl: `https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80`,
+      avatarUrl: USER_PROFILE.avatarUrl,
       emailVerified: true,
-      relationshipManager: {
-        name: 'Chinedu Adeleke',
-        title: 'VP, Sovereign Wealth & Private Banking',
-        email: 'c.adeleke@aureusbank.ng',
-        phone: '+234 1 890 0041',
-        office: '42 Marina, Lagos Financial District'
-      }
+      relationshipManager: USER_PROFILE.relationshipManager
     };
 
-    const initialAccount: BankAccount = {
-      id: `acc-nuban-${Date.now()}`,
-      name: `Sovereign Reserve (${formatted})`,
-      type: 'savings',
-      accountNumber: formatted,
-      routingNumber: bank.sortCode,
-      balance: 250000,
-      availableBalance: 250000,
-      currency: 'NGN',
-      interestRate: 12.5,
-      colorTheme: 'emerald'
-    };
-
-    // Save into registry
+    // Save into registry with the former full suite of accounts
     registry.push({
       user: newUser,
       password: sanitizedPayload.password,
-      accounts: [initialAccount]
+      accounts: INITIAL_ACCOUNTS
     });
     this.saveUserRegistry(registry);
 
-    // Save active session & accounts
+    // Save active session & original accounts
     localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(newUser));
-    localStorage.setItem(STORAGE_KEY_ACCOUNTS, JSON.stringify([initialAccount]));
+    localStorage.setItem(STORAGE_KEY_ACCOUNTS, JSON.stringify(INITIAL_ACCOUNTS));
 
     return {
       success: true,
       user: newUser,
-      message: 'Account successfully registered and institutional ledger provisioned.'
+      message: 'Account successfully registered and institutional portfolio activated.'
     };
   }
 
@@ -405,6 +384,7 @@ export class AuthService {
     };
 
     localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(googleUser));
+    localStorage.setItem(STORAGE_KEY_ACCOUNTS, JSON.stringify(INITIAL_ACCOUNTS));
     return {
       success: true,
       user: googleUser,
@@ -497,7 +477,11 @@ export class AuthService {
     if (!stored) return INITIAL_ACCOUNTS;
     try {
       const parsed = JSON.parse(stored);
-      return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_ACCOUNTS;
+      // If accounts only contain the temporary 1-account Sovereign Reserve test, restore the former multi-account design
+      if (Array.isArray(parsed) && parsed.length >= 3) {
+        return parsed;
+      }
+      return INITIAL_ACCOUNTS;
     } catch {
       return INITIAL_ACCOUNTS;
     }

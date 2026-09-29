@@ -75,149 +75,137 @@ html.light ::-webkit-scrollbar-thumb:hover {
 html.light,
 body.light,
 .light {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+/* Background defaults in light theme for un-migrated surfaces */
+html.light .bg-neutral-950:not([data-force-dark]),
+.light .bg-neutral-950:not([data-force-dark]) {
   background-color: #f8fafc !important;
-  color: #0f172a !important;
 }
 
-/* Backgrounds */
-html.light .bg-neutral-950,
-.light .bg-neutral-950 {
-  background-color: #f8fafc !important;
+html.light .bg-neutral-950\/90:not([data-force-dark]),
+.light .bg-neutral-950\/90:not([data-force-dark]),
+html.light .bg-neutral-950\/80:not([data-force-dark]),
+.light .bg-neutral-950\/80:not([data-force-dark]),
+html.light .bg-neutral-950\/70:not([data-force-dark]),
+.light .bg-neutral-950\/70:not([data-force-dark]),
+html.light .bg-neutral-950\/60:not([data-force-dark]),
+.light .bg-neutral-950\/60:not([data-force-dark]) {
+  background-color: rgba(248, 250, 252, 0.95) !important;
 }
 
-html.light .bg-neutral-950\/60,
-.light .bg-neutral-950\/60,
-html.light .bg-neutral-950\/70,
-.light .bg-neutral-950\/70,
-html.light .bg-neutral-950\/80,
-.light .bg-neutral-950\/80,
-html.light .bg-neutral-950\/90,
-.light .bg-neutral-950\/90 {
-  background-color: #f1f5f9 !important;
-}
-
-html.light .bg-neutral-900,
-.light .bg-neutral-900 {
+html.light .bg-neutral-900:not([data-force-dark]),
+.light .bg-neutral-900:not([data-force-dark]) {
   background-color: #ffffff !important;
 }
 
-html.light .bg-neutral-900\/40,
-.light .bg-neutral-900\/40,
-html.light .bg-neutral-900\/50,
-.light .bg-neutral-900\/50,
-html.light .bg-neutral-900\/60,
-.light .bg-neutral-900\/60,
-html.light .bg-neutral-900\/70,
-.light .bg-neutral-900\/70,
-html.light .bg-neutral-900\/80,
-.light .bg-neutral-900\/80,
-html.light .bg-neutral-900\/90,
-.light .bg-neutral-900\/90,
-html.light .bg-neutral-900\/95,
-.light .bg-neutral-900\/95 {
+html.light .bg-neutral-900\/90:not([data-force-dark]),
+.light .bg-neutral-900\/90:not([data-force-dark]),
+html.light .bg-neutral-900\/80:not([data-force-dark]),
+.light .bg-neutral-900\/80:not([data-force-dark]),
+html.light .bg-neutral-900\/70:not([data-force-dark]),
+.light .bg-neutral-900\/70:not([data-force-dark]),
+html.light .bg-neutral-900\/60:not([data-force-dark]),
+.light .bg-neutral-900\/60:not([data-force-dark]),
+html.light .bg-neutral-900\/50:not([data-force-dark]),
+.light .bg-neutral-900\/50:not([data-force-dark]) {
   background-color: #ffffff !important;
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
 }
 
-html.light .bg-neutral-850,
-.light .bg-neutral-850,
-html.light .bg-neutral-800,
-.light .bg-neutral-800 {
+html.light .bg-neutral-850:not([data-force-dark]),
+.light .bg-neutral-850:not([data-force-dark]),
+html.light .bg-neutral-800:not([data-force-dark]),
+.light .bg-neutral-800:not([data-force-dark]),
+html.light .bg-neutral-800\/80:not([data-force-dark]),
+.light .bg-neutral-800\/80:not([data-force-dark]),
+html.light .bg-neutral-800\/60:not([data-force-dark]),
+.light .bg-neutral-800\/60:not([data-force-dark]),
+html.light .bg-neutral-800\/50:not([data-force-dark]),
+.light .bg-neutral-800\/50:not([data-force-dark]) {
   background-color: #f1f5f9 !important;
 }
 
-html.light .hover\:bg-neutral-850:hover,
-.light .hover\:bg-neutral-850:hover,
-html.light .hover\:bg-neutral-800:hover,
-.light .hover\:bg-neutral-800:hover {
+html.light .hover\:bg-neutral-850:hover:not([data-force-dark]),
+.light .hover\:bg-neutral-850:hover:not([data-force-dark]),
+html.light .hover\:bg-neutral-800:hover:not([data-force-dark]),
+.light .hover\:bg-neutral-800:hover:not([data-force-dark]),
+html.light .hover\:bg-neutral-900:hover:not([data-force-dark]),
+.light .hover\:bg-neutral-900:hover:not([data-force-dark]) {
   background-color: #e2e8f0 !important;
 }
 
-html.light .bg-neutral-750,
-.light .bg-neutral-750 {
-  background-color: #e2e8f0 !important;
-}
-
-/* Borders */
-html.light .border-neutral-800,
-.light .border-neutral-800,
-html.light .border-neutral-800\/80,
-.light .border-neutral-800\/80,
-html.light .border-neutral-800\/60,
-.light .border-neutral-800\/60,
-html.light .border-neutral-800\/50,
-.light .border-neutral-800\/50,
-html.light .border-neutral-800\/40,
-.light .border-neutral-800\/40,
-html.light .border-neutral-850,
-.light .border-neutral-850,
-html.light .border-neutral-750,
-.light .border-neutral-750,
-html.light .border-neutral-700,
-.light .border-neutral-700,
-html.light .border-neutral-700\/60,
-.light .border-neutral-700\/60,
-html.light .border-neutral-700\/80,
-.light .border-neutral-700\/80 {
+/* Hairline borders in light theme */
+html.light .border-neutral-800:not([data-force-dark]),
+.light .border-neutral-800:not([data-force-dark]),
+html.light .border-neutral-800\/80:not([data-force-dark]),
+.light .border-neutral-800\/80:not([data-force-dark]),
+html.light .border-neutral-750:not([data-force-dark]),
+.light .border-neutral-750:not([data-force-dark]),
+html.light .border-neutral-700:not([data-force-dark]),
+.light .border-neutral-700:not([data-force-dark]),
+html.light .border-neutral-700\/80:not([data-force-dark]),
+.light .border-neutral-700\/80:not([data-force-dark]),
+html.light .border-neutral-700\/60:not([data-force-dark]),
+.light .border-neutral-700\/60:not([data-force-dark]) {
   border-color: #e2e8f0 !important;
 }
 
-/* Text Colors */
-html.light .text-neutral-100,
-.light .text-neutral-100 {
+/* Text color mirroring in light theme */
+html.light .text-neutral-100:not([data-force-dark]):not([data-force-dark] *),
+.light .text-neutral-100:not([data-force-dark]):not([data-force-dark] *) {
   color: #0f172a !important;
 }
 
-html.light .text-neutral-200,
-.light .text-neutral-200 {
+html.light .text-neutral-200:not([data-force-dark]):not([data-force-dark] *),
+.light .text-neutral-200:not([data-force-dark]):not([data-force-dark] *) {
   color: #1e293b !important;
 }
 
-html.light .text-neutral-300,
-.light .text-neutral-300 {
+html.light .text-neutral-300:not([data-force-dark]):not([data-force-dark] *),
+.light .text-neutral-300:not([data-force-dark]):not([data-force-dark] *) {
   color: #334155 !important;
 }
 
-html.light .text-neutral-400,
-.light .text-neutral-400 {
+html.light .text-neutral-400:not([data-force-dark]):not([data-force-dark] *),
+.light .text-neutral-400:not([data-force-dark]):not([data-force-dark] *) {
   color: #64748b !important;
 }
 
-html.light .text-neutral-500,
-.light .text-neutral-500 {
+html.light .text-neutral-500:not([data-force-dark]):not([data-force-dark] *),
+.light .text-neutral-500:not([data-force-dark]):not([data-force-dark] *) {
   color: #94a3b8 !important;
 }
 
-html.light .text-neutral-600,
-.light .text-neutral-600 {
+html.light .text-neutral-600:not([data-force-dark]):not([data-force-dark] *),
+.light .text-neutral-600:not([data-force-dark]):not([data-force-dark] *) {
   color: #cbd5e1 !important;
 }
 
-/* Light mode specific inputs */
-html.light input,
+/* Inputs & Form controls in light theme */
+html.light input:not([type="checkbox"]):not([type="radio"]),
 html.light select,
 html.light textarea,
-.light input,
+.light input:not([type="checkbox"]):not([type="radio"]),
 .light select,
 .light textarea {
-  background-color: #ffffff !important;
-  color: #0f172a !important;
-  border-color: #cbd5e1 !important;
+  background-color: #ffffff;
+  color: #0f172a;
+  border-color: #cbd5e1;
 }
 
 html.light input::placeholder,
-html.light textarea::placeholder,
 .light input::placeholder,
+html.light textarea::placeholder,
 .light textarea::placeholder {
-  color: #94a3b8 !important;
+  color: #94a3b8;
 }
 
-html.light input:focus,
-html.light select:focus,
-html.light textarea:focus,
-.light input:focus,
-.light select:focus,
-.light textarea:focus {
-  border-color: #10b981 !important;
-  outline: none !important;
+/* Dialog and backdrop overlays in light theme */
+html.light .bg-black\/80,
+.light .bg-black\/80,
+html.light .bg-neutral-950\/80,
+.light .bg-neutral-950\/80 {
+  background-color: rgba(15, 23, 42, 0.6) !important;
 }
