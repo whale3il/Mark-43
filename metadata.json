@@ -1,0 +1,6 @@
+{
+  "name": "Aureus Private Banking & Wealth OS",
+  "description": "Modern, sharp, premium banking web application with clean fintech aesthetics, accounts, instant transfers, card controls, spending analytics, and design specifications.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
