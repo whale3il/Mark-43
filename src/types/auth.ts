@@ -31,6 +31,11 @@ export interface AuthUser {
 
 export type AuthMode = 'login' | 'signup';
 
+/**
+ * Strict signup flow state sequence: FORM -> VERIFICATION -> SUCCESS
+ */
+export type SignUpStep = 'FORM' | 'VERIFICATION' | 'SUCCESS';
+
 export interface UserRegistrationPayload {
   firstName: string;
   lastName: string;
@@ -57,14 +62,17 @@ export interface ForgotPasswordPayload {
 
 export interface VerifyEmailPayload {
   email: string;
-  token: string;
+  token: string; // 6-digit verification code
+}
+
+export interface ResendVerificationPayload {
+  email: string;
 }
 
 export interface AuthApiResponse {
   success: boolean;
   user?: AuthUser;
   token?: string;
-  requiresEmailVerification?: boolean;
   message?: string;
   error?: {
     code:
@@ -72,12 +80,13 @@ export interface AuthApiResponse {
       | 'EMAIL_EXISTS'
       | 'USERNAME_TAKEN'
       | 'EMAIL_VERIFICATION_REQUIRED'
+      | 'INVALID_VERIFICATION_CODE'
       | 'GOOGLE_AUTH_FAILED'
       | 'NETWORK_ERROR'
       | 'VALIDATION_ERROR'
       | 'SERVER_ERROR';
     message: string;
-    field?: 'email' | 'username' | 'password' | 'phone' | 'firstName' | 'lastName';
+    field?: 'email' | 'username' | 'password' | 'phone' | 'firstName' | 'lastName' | 'code';
   };
 }
 
@@ -94,19 +103,4 @@ export interface AccountCreationPayload {
   accountNickname: string;
   initialDeposit: number;
   dailyTransferLimit: number;
-}
-
-export interface GeneratedNubanAccount {
-  accountNumber: string;
-  accountName: string;
-  bankName: string;
-  cbnBankCode: string;
-  nibssRoutingCode: string;
-  accountType: 'savings' | 'checking' | 'multicurrency' | 'investment';
-  accountCategoryTitle: string;
-  currency: CurrencyCode;
-  openingBalance: number;
-  dailyTransferLimit: number;
-  status: 'active' | 'pending';
-  issuedAt: string;
 }

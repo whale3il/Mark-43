@@ -81,13 +81,13 @@ export default function App() {
   // Dedicated Support Unread Counter State
   const [supportUnreadCount, setSupportUnreadCount] = useState<number>(2);
 
-  // Authentication & Session State
-  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => AuthService.getCurrentUser());
+  // Authentication & Session State (pure frontend client state)
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
 
-  // Core Data States
-  const [accounts, setAccounts] = useState<BankAccount[]>(() => AuthService.getUserStoredAccounts());
+  // Core Data States (pure frontend client state)
+  const [accounts, setAccounts] = useState<BankAccount[]>(INITIAL_ACCOUNTS);
   const [transactions, setTransactions] = useState<Transaction[]>(INITIAL_TRANSACTIONS);
   const [beneficiaries, setBeneficiaries] = useState<Beneficiary[]>(INITIAL_BENEFICIARIES);
   const [cards, setCards] = useState<PaymentCard[]>(INITIAL_CARDS);
@@ -296,7 +296,7 @@ export default function App() {
         <SignUpView
           onSuccess={(user) => {
             setCurrentUser(user);
-            setAccounts(AuthService.getUserStoredAccounts());
+            setAccounts(INITIAL_ACCOUNTS);
             setActiveTab('dashboard');
             setIsDesignMode(false);
             showToast(`Welcome to Aureus Wealth, ${user.firstName}. Sovereign Vault Cleared.`);
@@ -312,7 +312,7 @@ export default function App() {
       <LoginView
         onSuccess={(user) => {
           setCurrentUser(user);
-          setAccounts(AuthService.getUserStoredAccounts());
+          setAccounts(INITIAL_ACCOUNTS);
           setActiveTab('dashboard');
           setIsDesignMode(false);
           showToast(`Welcome back, ${user.name}`);
