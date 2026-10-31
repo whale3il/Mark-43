@@ -107,6 +107,16 @@ export const OpenVaultModal: React.FC<OpenVaultModalProps> = ({ onClose, onCreat
             />
           </div>
 
+          {currency === 'USD' && (
+            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-start gap-2 text-emerald-400 text-[11px] leading-relaxed animate-in fade-in">
+              <Shield className="w-4 h-4 shrink-0 mt-0.5 text-emerald-400" />
+              <div>
+                <span className="font-semibold block text-emerald-300">Automatic USD Wallet Provisioning</span>
+                <span>This USD vault will automatically provision and link a dedicated cryptographic settlement wallet address upon authorization.</span>
+              </div>
+            </div>
+          )}
+
           <div className="p-3 rounded-xl bg-neutral-950 border border-neutral-850 flex items-start gap-2 text-neutral-400 text-[11px] leading-relaxed">
             <Shield className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
             <span>

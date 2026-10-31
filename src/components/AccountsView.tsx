@@ -115,8 +115,15 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
               <div className={`mt-2 text-lg font-bold font-sans tabular-nums ${isLight ? 'text-slate-900' : 'text-neutral-100'}`}>
                 {formatAmount(acc.balance, acc.currency)}
               </div>
-              <div className={`mt-2 text-[10px] font-mono ${isLight ? 'text-slate-400' : 'text-neutral-500'}`}>
-                •••• {acc.accountNumber.slice(-4)}
+              <div className="flex items-center justify-between mt-2">
+                <span className={`text-[10px] font-mono ${isLight ? 'text-slate-400' : 'text-neutral-500'}`}>
+                  •••• {acc.accountNumber.slice(-4)}
+                </span>
+                {acc.currency === 'USD' && acc.walletAddress && (
+                  <span className="text-[9px] font-mono text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20">
+                    USD Wallet Linked
+                  </span>
+                )}
               </div>
             </button>
           );
@@ -239,6 +246,54 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Automatic USD Provisioned Sovereign Wallet Address */}
+          {selectedAccount.currency === 'USD' && selectedAccount.walletAddress && (
+            <div className={`p-4 rounded-xl border transition-all ${
+              isLight ? 'bg-emerald-50/70 border-emerald-200' : 'bg-emerald-500/10 border-emerald-500/30'
+            }`}>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] font-mono uppercase font-bold px-2 py-0.5 rounded-full ${
+                    isLight ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-500/20 text-emerald-400'
+                  }`}>
+                    Linked USD Sovereign Wallet
+                  </span>
+                  <span className={`text-[11px] ${isLight ? 'text-emerald-700' : 'text-emerald-400'}`}>
+                    • Auto-Provisioned Settlement Address
+                  </span>
+                </div>
+                <button
+                  onClick={() => copyField(selectedAccount.walletAddress!, 'usd-wallet')}
+                  className={`self-start sm:self-auto flex items-center gap-1.5 text-[11px] font-medium font-mono px-2.5 py-1 rounded-lg transition-colors ${
+                    isLight
+                      ? 'bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-200 shadow-2xs'
+                      : 'bg-neutral-900 hover:bg-neutral-850 text-emerald-400 border border-emerald-500/30 shadow-xs'
+                  }`}
+                >
+                  {copiedKey === 'usd-wallet' ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-500" />
+                      <span>Copied Address</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copy Wallet Address</span>
+                    </>
+                  )}
+                </button>
+              </div>
+              <div className={`font-mono text-xs break-all select-all font-semibold ${
+                isLight ? 'text-slate-900' : 'text-neutral-100'
+              }`}>
+                {selectedAccount.walletAddress}
+              </div>
+              <p className={`text-[10px] mt-1.5 ${isLight ? 'text-slate-500' : 'text-neutral-400'}`}>
+                Cryptographic settlement coordinate automatically generated and paired with your USD vault.
+              </p>
+            </div>
+          )}
 
           {/* Account Ledger History */}
           <div>

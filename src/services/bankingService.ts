@@ -17,6 +17,23 @@ import { AccountCreationPayload } from '../types/auth';
 
 export class BankingService {
   /**
+   * GET /api/banking/dashboard
+   * Consolidated server-side data fetching from Prisma & Supabase backend.
+   */
+  static async getDashboard() {
+    return apiRequest<{
+      accounts: BankAccount[];
+      transactions: Transaction[];
+      beneficiaries: Beneficiary[];
+      cards: PaymentCard[];
+      bills: BillPayment[];
+      goals: SavingsGoal[];
+      sessions: UserSession[];
+      profile: any;
+    }>('/banking/dashboard');
+  }
+
+  /**
    * GET /api/banking/accounts
    */
   static async getAccounts() {

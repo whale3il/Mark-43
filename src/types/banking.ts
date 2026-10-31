@@ -13,6 +13,8 @@ export interface BankAccount {
   currency: CurrencyCode;
   interestRate?: number;
   colorTheme: string;
+  walletAddress?: string;
+  isWalletProvisioned?: boolean;
 }
 
 export interface Transaction {

@@ -1,0 +1,235 @@
+// Aureus Wealth & Private Banking OS
+// Database Schema for Supabase (PostgreSQL) and Prisma ORM
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum CurrencyCode {
+  USD
+  EUR
+  GBP
+  CHF
+  NGN
+}
+
+enum AccountType {
+  checking
+  savings
+  investment
+  multicurrency
+}
+
+enum TransactionStatus {
+  settled
+  pending
+  processing
+}
+
+model User {
+  id                  String        @id @default(cuid())
+  email               String        @unique
+  username            String        @unique
+  passwordHash        String?
+  firstName           String
+  lastName            String
+  phone               String?
+  clientTier          String        @default("Aureus Sovereign Private Client")
+  kycLevel            String        @default("Tier 3 (BVN & ID Verified)")
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  profile             Profile?
+  accounts            Account[]
+  beneficiaries       Beneficiary[]
+  cards               PaymentCard[]
+  bills               BillPayment[]
+  savingsGoals        SavingsGoal[]
+  notifications       Notification[]
+  sessions            Session[]
+
+  @@map("users")
+}
+
+model Profile {
+  id                  String        @id @default(cuid())
+  userId              String        @unique
+  user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title               String        @default("Managing Partner & Principal")
+  avatarUrl           String?
+  memberSince         String        @default("2021")
+  rmName              String        @default("Marcus Sterling")
+  rmTitle             String        @default("Senior VP, Private Banking & Wealth")
+  rmEmail             String        @default("marcus.sterling@aureusbank.com")
+  rmPhone             String        @default("+1 (212) 555-0199")
+  rmOffice            String        @default("540 Madison Ave, New York, NY")
+  updatedAt           DateTime      @updatedAt
+
+  @@map("profiles")
+}
+
+model Account {
+  id                  String        @id @default(cuid())
+  userId              String
+  user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                String
+  type                AccountType   @default(checking)
+  accountNumber       String        @unique
+  routingNumber       String        @default("021000089")
+  iban                String?
+  swiftBic            String?
+  balance             Float         @default(0.0)
+  availableBalance    Float         @default(0.0)
+  currency            CurrencyCode  @default(USD)
+  interestRate        Float?
+  colorTheme          String        @default("emerald")
+  
+  // CRITICAL REQUIREMENT:
+  // Any account that uses US Dollars (USD) automatically provisions and links a unique wallet address.
+  walletAddress       String?       @unique
+  isWalletProvisioned Boolean       @default(false)
+  
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  transactions        Transaction[]
+
+  @@map("accounts")
+}
+
+model Transaction {
+  id                  String              @id @default(cuid())
+  accountId           String
+  account             Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  date                String
+  time                String
+  merchant            String
+  category            String              @default("Transfers")
+  amount              Float
+  currency            CurrencyCode        @default(USD)
+  status              TransactionStatus   @default(settled)
+  iconType            String              @default("send")
+  paymentMethod       String              @default("Fedwire Realtime")
+  referenceNumber     String              @unique
+  notes               String?
+  recipientWallet     String?
+  createdAt           DateTime            @default(now())
+
+  @@map("transactions")
+}
+
+model Beneficiary {
+  id                  String        @id @default(cuid())
+  userId              String
+  user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                String
+  email               String
+  bankName            String
+  accountNumber       String
+  routingNumber       String
+  avatarUrl           String?
+  initials            String
+  category            String        @default("Business")
+  verified            Boolean       @default(true)
+  walletAddress       String?
+  createdAt           DateTime      @default(now())
+
+  @@map("beneficiaries")
+}
+
+model PaymentCard {
+  id                  String        @id @default(cuid())
+  userId              String
+  user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nameOnCard          String
+  cardType            String        @default("physical")
+  tier                String        @default("Obsidian Black Metal")
+  last4               String
+  fullNumberMasked    String
+  fullNumberRevealed  String
+  expiry              String
+  cvv                 String
+  billingZip          String
+  isFrozen            Boolean       @default(false)
+  contactlessEnabled  Boolean       @default(true)
+  onlinePaymentsEnabled Boolean     @default(true)
+  atmWithdrawalsEnabled Boolean     @default(true)
+  monthlyLimit        Float         @default(150000)
+  spentThisMonth      Float         @default(34800)
+  dailyAtmLimit       Float         @default(10000)
+  atmSpentToday       Float         @default(0)
+  pin                 String        @default("9482")
+  linkedAccountId     String?
+  createdAt           DateTime      @default(now())
+
+  @@map("payment_cards")
+}
+
+model BillPayment {
+  id                  String        @id @default(cuid())
+  userId              String
+  user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  billerName          String
+  category            String
+  accountNumber       String
+  amount              Float
+  dueDate             String
+  frequency           String        @default("Monthly")
+  autoPay             Boolean       @default(true)
+  status              String        @default("scheduled")
+  lastPaidDate        String?
+  createdAt           DateTime      @default(now())
+
+  @@map("bill_payments")
+}
+
+model SavingsGoal {
+  id                  String        @id @default(cuid())
+  userId              String
+  user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title               String
+  targetAmount        Float
+  currentAmount       Float
+  currency            CurrencyCode  @default(USD)
+  targetDate          String
+  category            String
+  monthlyContribution Float
+  color               String
+  createdAt           DateTime      @default(now())
+
+  @@map("savings_goals")
+}
+
+model Notification {
+  id                  String        @id @default(cuid())
+  userId              String
+  user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title               String
+  message             String
+  timestamp           String
+  read                Boolean       @default(false)
+  type                String        @default("transaction")
+  createdAt           DateTime      @default(now())
+
+  @@map("notifications")
+}
+
+model Session {
+  id                  String        @id @default(cuid())
+  userId              String
+  user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device              String
+  browser             String
+  location            String
+  ipAddress           String
+  lastActive          String
+  isCurrent           Boolean       @default(false)
+  createdAt           DateTime      @default(now())
+
+  @@map("sessions")
+}
