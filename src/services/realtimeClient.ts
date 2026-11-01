@@ -1,15 +1,24 @@
 /**
- * Aureus Wealth - Real-time SSE Connection Pipeline
- * Listens to server events over /api/realtime for zero-refresh dashboard synchronizations.
+ * Aureus Wealth - Real-time Event Client Pipeline
+ * 
+ * Ready to connect to backend Server-Sent Events (SSE), WebSockets, or Supabase Realtime channels.
+ * When the server is connected, events stream over the configured REALTIME_URL.
+ * Also provides client-side event emission for zero-latency UI updates during development.
  */
 
 export type RealtimeHandler = (eventType: string, payload: any) => void;
+
+export const REALTIME_URL =
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_REALTIME_URL) ||
+  '/api/realtime';
 
 class RealtimeClient {
   private eventSource: EventSource | null = null;
   private listeners: Set<RealtimeHandler> = new Set();
   private isConnecting = false;
   private reconnectTimer: any = null;
+  private maxReconnectAttempts = 3;
+  private reconnectAttempts = 0;
 
   public connect(): void {
     if (typeof window === 'undefined') return;
@@ -19,10 +28,11 @@ class RealtimeClient {
     this.isConnecting = true;
 
     try {
-      this.eventSource = new EventSource('/api/realtime');
+      this.eventSource = new EventSource(REALTIME_URL);
 
       this.eventSource.onopen = () => {
         this.isConnecting = false;
+        this.reconnectAttempts = 0;
         if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
       };
 
@@ -32,16 +42,19 @@ class RealtimeClient {
           this.eventSource.close();
           this.eventSource = null;
         }
-        // Auto-reconnect after 3 seconds
-        if (!this.reconnectTimer) {
-          this.reconnectTimer = setTimeout(() => {
-            this.reconnectTimer = null;
-            this.connect();
-          }, 3000);
+        // Limit auto-reconnect backoff so we don't spam if backend is not yet started
+        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+          this.reconnectAttempts++;
+          if (!this.reconnectTimer) {
+            this.reconnectTimer = setTimeout(() => {
+              this.reconnectTimer = null;
+              this.connect();
+            }, 5000);
+          }
         }
       };
 
-      // Register standard banking events
+      // Standard private banking event topics
       const eventNames = [
         'account:created',
         'account:updated',
@@ -69,7 +82,7 @@ class RealtimeClient {
           }
         });
       }
-    } catch (err) {
+    } catch {
       this.isConnecting = false;
     }
   }
@@ -80,6 +93,10 @@ class RealtimeClient {
     return () => {
       this.listeners.delete(handler);
     };
+  }
+
+  public emit(eventType: string, payload: any): void {
+    this.notifyListeners(eventType, payload);
   }
 
   private notifyListeners(eventType: string, payload: any): void {

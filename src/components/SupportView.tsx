@@ -35,7 +35,8 @@ import {
   SUPPORT_AGENTS,
   INITIAL_CONVERSATIONS,
   INITIAL_TICKETS
-} from '../data/supportMockData';
+} from '../data/mockData';
+
 
 interface SupportViewProps {
   onUnreadChange?: (totalUnread: number) => void;

@@ -1,0 +1,794 @@
+# ==============================================================================
+# AUREUS PRIVATE WEALTH & BANKING OS - DATABASE SCHEMA REFERENCE
+# Supabase (PostgreSQL) & Prisma ORM Blueprint
+# ==============================================================================
+# This document defines the complete relational schema, tables, enums, 
+# relationships, foreign keys, indexes, and business constraints for building 
+# the backend database and server services.
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. CORE ENUMS & TYPES
+# ------------------------------------------------------------------------------
+
+Enum CurrencyCode {
+  USD   // US Dollar (triggers sovereign settlement wallet auto-provisioning)
+  EUR   // Euro
+  GBP   // British Pound Sterling
+  CHF   // Swiss Franc
+  NGN   // Nigerian Naira
+}
+
+Enum AccountType {
+  checking        // High-liquidity operating account
+  savings         // High-yield reserve vault (APY accrual)
+  investment      // Capital syndicate / private equity allocation
+  multicurrency   // Multi-currency cross-border vault
+}
+
+Enum TransactionStatus {
+  settled         // Finalized & cleared funds
+  pending         // Under clearing / AML verification
+  processing      // Dispatched across correspondent network
+}
+
+Enum CardTier {
+  Obsidian_Black_Metal         // Physical obsidian metal card ($250k limit)
+  Titanium_Precision_Virtual   // Ephemeral / virtual tokenized card ($50k limit)
+  Corporate_Platinum          // Multi-signatory corporate debit
+}
+
+Enum KycTier {
+  Tier_1          // Basic verification
+  Tier_2          // Identity & address verified
+  Tier_3          // Sovereign Private Client (BVN, passport, source of wealth verified)
+}
+
+# ------------------------------------------------------------------------------
+# 2. MODELS & TABLE SCHEMAS
+# ------------------------------------------------------------------------------
+
+# Table: users
+# Maps to: User model
+Table users {
+  id                   String        [PK, default: cuid/uuid]
+  email                String        [Unique, Not Null]
+  username             String        [Unique, Not Null]
+  password_hash        String?       [Nullable if authenticated via OAuth / Supabase Auth]
+  first_name           String        [Not Null]
+  last_name            String        [Not Null]
+  phone                String?
+  client_tier          String        [Default: "Aureus Sovereign Private Client"]
+  kyc_level            String        [Default: "Tier 3 (BVN & ID Verified)"]
+  email_verified       Boolean       [Default: false]
+  verification_code    String?       [6-digit verification code, length: 6]
+  verification_expires DateTime?     [Expiry timestamp for 6-digit OTP]
+  has_transaction_pin  Boolean       [Default: true]
+  transaction_pin_hash String?       [Bcrypt hash of 4-digit transaction authorization PIN]
+  created_at           DateTime      [Default: now()]
+  updated_at           DateTime      [Auto-update: now()]
+
+  # Relationships:
+  profile              profiles?
+  accounts             accounts[]
+  beneficiaries        beneficiaries[]
+  payment_cards        payment_cards[]
+  bill_payments        bill_payments[]
+  savings_goals        savings_goals[]
+  notifications        notifications[]
+  sessions             sessions[]
+  support_tickets      support_tickets[]
+}
+
+# Table: profiles
+# Maps to: Profile model (Private Banking client details & Relationship Manager)
+Table profiles {
+  id                   String        [PK, default: cuid/uuid]
+  user_id              String        [Unique, FK -> users.id, Cascade Delete]
+  title                String        [Default: "Managing Partner & Principal"]
+  avatar_url           String?
+  member_since         String        [Default: "2021"]
+  account_number_mask  String        [Default: "•••• 8924"]
+  rm_name              String        [Default: "Marcus Sterling"]
+  rm_title             String        [Default: "Senior VP, Private Banking & Wealth"]
+  rm_email             String        [Default: "marcus.sterling@aureusbank.com"]
+  rm_phone             String        [Default: "+1 (212) 555-0199"]
+  rm_office            String        [Default: "540 Madison Ave, New York, NY"]
+  updated_at           DateTime      [Auto-update: now()]
+}
+
+# Table: accounts
+# Maps to: Account model
+# CRITICAL BUSINESS RULE:
+# Any account where currency = 'USD' MUST automatically provision and link 
+# a unique sovereign cryptographic settlement wallet address (EIP-55 format, 
+# e.g., '0x8b32A46F0C9d71A12B8025e16738Eb2463FbcE39') with is_wallet_provisioned = true.
+# Non-USD accounts (EUR, GBP, CHF, NGN) have wallet_address = null and is_wallet_provisioned = false.
+Table accounts {
+  id                     String        [PK, default: cuid/uuid]
+  user_id                String        [FK -> users.id, Cascade Delete]
+  name                   String        [Not Null, e.g., "Premier Liquidity Checking"]
+  type                   AccountType   [Default: checking]
+  account_number         String        [Unique, Not Null, e.g., "8940 3120 4821"]
+  routing_number         String        [Default: "021000089"]
+  iban                   String?       [e.g., "GB29 NWBK 6016 1331 9268 19"]
+  swift_bic              String?       [e.g., "UBSWCHZH"]
+  balance                Decimal(18,2) [Default: 0.00]
+  available_balance      Decimal(18,2) [Default: 0.00]
+  currency               CurrencyCode  [Default: USD]
+  interest_rate          Decimal(5,2)? [Optional, e.g., 4.85 for Treasury Vault]
+  color_theme            String        [Default: "zinc"]
+  
+  # Sovereign Wallet Provisioning Fields:
+  wallet_address         String?       [Unique, EIP-55 42-char hex string, e.g. 0x8b32...]
+  is_wallet_provisioned  Boolean       [Default: false]
+
+  created_at             DateTime      [Default: now()]
+  updated_at             DateTime      [Auto-update: now()]
+
+  # Relationships:
+  transactions           transactions[]
+}
+
+# Table: transactions
+# Maps to: Transaction model (Ledger entries & wire disbursements)
+Table transactions {
+  id                     String            [PK, default: cuid/uuid]
+  account_id             String            [FK -> accounts.id, Cascade Delete]
+  date                   String            [ISO Date: YYYY-MM-DD]
+  time                   String            [e.g., "14:22" or "02:30 PM"]
+  merchant               String            [Counterparty / Institution / Payee]
+  category               String            [Default: "Transfers"]
+  amount                 Decimal(18,2)     [Positive = Inflow, Negative = Outflow]
+  currency               CurrencyCode      [Default: USD]
+  status                 TransactionStatus [Default: settled]
+  icon_type              String            [Default: "send"]
+  payment_method         String            [Default: "Fedwire Realtime"]
+  reference_number       String            [Unique, e.g., "WRE-948201"]
+  notes                  String?           [Memo / Transfer purpose]
+  recipient_wallet       String?           [Optional settlement wallet address]
+  created_at             DateTime          [Default: now()]
+}
+
+# Table: beneficiaries
+# Maps to: Beneficiary model (Verified counterparties & payment directories)
+Table beneficiaries {
+  id                     String        [PK, default: cuid/uuid]
+  user_id                String        [FK -> users.id, Cascade Delete]
+  name                   String        [Not Null, Counterparty full name]
+  email                  String        [Counterparty contact email]
+  bank_name              String        [Institution name, e.g. "UBS AG Switzerland"]
+  account_number         String        [Not Null]
+  routing_number         String        [Not Null, ABA routing or BIC/Sort code]
+  avatar_url             String?
+  initials               String        [2-character initials, e.g. "ER"]
+  category               String        [Default: "Business", values: Personal, Business, Family Office, Real Estate]
+  verified               Boolean       [Default: true]
+  wallet_address         String?       [Counterparty wallet address if crypto-settled]
+  last_transfer_date     String?
+  created_at             DateTime      [Default: now()]
+}
+
+# Table: payment_cards
+# Maps to: PaymentCard model (Obsidian Metal & Titanium Virtual cards)
+Table payment_cards {
+  id                     String        [PK, default: cuid/uuid]
+  user_id                String        [FK -> users.id, Cascade Delete]
+  linked_account_id      String?       [FK -> accounts.id, Set Null on Delete]
+  name_on_card           String        [e.g., "ALEXANDER V WRIGHT"]
+  card_type              String        [physical | virtual]
+  tier                   String        [Obsidian Black Metal | Titanium Precision Virtual]
+  last4                  String        [Length: 4]
+  full_number_masked     String        [e.g., "•••• •••• •••• 8942"]
+  full_number_revealed   String        [Encrypted / Tokenized PAN]
+  expiry                 String        [MM/YY, e.g., "09/29"]
+  cvv                    String        [Length: 3]
+  billing_zip            String        [e.g., "10022"]
+  is_frozen              Boolean       [Default: false]
+  contactless_enabled    Boolean       [Default: true]
+  online_payments_enabled Boolean      [Default: true]
+  atm_withdrawals_enabled Boolean      [Default: true]
+  monthly_limit          Decimal(18,2) [Default: 250000.00]
+  spent_this_month       Decimal(18,2) [Default: 0.00]
+  daily_atm_limit        Decimal(18,2) [Default: 10000.00]
+  atm_spent_today        Decimal(18,2) [Default: 0.00]
+  pin_hash               String        [Default hash for "9482"]
+  created_at             DateTime      [Default: now()]
+}
+
+# Table: bill_payments
+# Maps to: BillPayment model (Scheduled invoices & executive vendor sweeps)
+Table bill_payments {
+  id                     String        [PK, default: cuid/uuid]
+  user_id                String        [FK -> users.id, Cascade Delete]
+  biller_name            String        [e.g., "Manhattan Penthouse HOA & Reserve"]
+  category               String        [e.g., "Real Estate & Property", "Aviation", "Insurance"]
+  account_number         String        [Biller account or policy ID]
+  amount                 Decimal(18,2) [Not Null]
+  due_date               String        [ISO Date: YYYY-MM-DD]
+  frequency              String        [Default: "Monthly", values: Monthly, Quarterly, Annual]
+  auto_pay               Boolean       [Default: true]
+  status                 String        [Default: "scheduled", values: scheduled, paid, overdue]
+  last_paid_date         String?
+  created_at             DateTime      [Default: now()]
+}
+
+# Table: savings_goals
+# Maps to: SavingsGoal model (Capital reserves & syndicate targets)
+Table savings_goals {
+  id                     String        [PK, default: cuid/uuid]
+  user_id                String        [FK -> users.id, Cascade Delete]
+  title                  String        [e.g., "Aspen Ski Compound Acquisition"]
+  target_amount          Decimal(18,2) [Target goal amount]
+  current_amount         Decimal(18,2) [Current allocated capital]
+  currency               CurrencyCode  [Default: USD]
+  target_date            String        [e.g., "Dec 2026"]
+  category               String        [e.g., "Property", "Venture Fund", "Liquid Reserve"]
+  monthly_contribution   Decimal(18,2) [Default: 0.00]
+  color                  String        [Default: "emerald"]
+  created_at             DateTime      [Default: now()]
+}
+
+# Table: notifications
+# Maps to: Notification model (Yield credits, wire alerts, security notices)
+Table notifications {
+  id                     String        [PK, default: cuid/uuid]
+  user_id                String        [FK -> users.id, Cascade Delete]
+  title                  String        [Not Null]
+  message                String        [Not Null]
+  timestamp              String        [e.g., "14:23 Today"]
+  read                   Boolean       [Default: false]
+  type                   String        [Default: "transaction", values: transaction, yield, security, system]
+  created_at             DateTime      [Default: now()]
+}
+
+# Table: sessions
+# Maps to: Session model (FIDO2 active devices & security governance)
+Table sessions {
+  id                     String        [PK, default: cuid/uuid]
+  user_id                String        [FK -> users.id, Cascade Delete]
+  device                 String        [e.g., "Apple MacBook Pro 16\" M3 Max"]
+  browser                String        [e.g., "Safari 18.2 (macOS Sequoia)"]
+  location               String        [e.g., "New York, USA"]
+  ip_address             String        [e.g., "192.88.99.14 (Bloomberg Gateway)"]
+  last_active            String        [e.g., "Active right now"]
+  is_current             Boolean       [Default: false]
+  created_at             DateTime      [Default: now()]
+}
+
+# Table: support_tickets
+# Maps to: SupportTicket model (Dedicated Private Wealth concierge requests)
+Table support_tickets {
+  id                     String        [PK, e.g. "TKT-8921-NY"]
+  user_id                String        [FK -> users.id, Cascade Delete]
+  subject                String        [Not Null]
+  category               String        [e.g., "Custody & Escrow", "Wire Clearance", "Limit Increase"]
+  priority               String        [High | Normal | Low]
+  status                 String        [In Review | Resolved | Pending]
+  assigned_agent         String        [e.g., "Marcus Sterling"]
+  description            String
+  conversation_id        String?
+  created_at             DateTime      [Default: now()]
+  updated_at             DateTime      [Auto-update: now()]
+}
+
+# ------------------------------------------------------------------------------
+# 3. PRISMA SCHEMA DEFINITION (prisma/schema.prisma)
+# ------------------------------------------------------------------------------
+
+```prisma
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum CurrencyCode {
+  USD
+  EUR
+  GBP
+  CHF
+  NGN
+}
+
+enum AccountType {
+  checking
+  savings
+  investment
+  multicurrency
+}
+
+enum TransactionStatus {
+  settled
+  pending
+  processing
+}
+
+model User {
+  id                  String         @id @default(cuid())
+  email               String         @unique
+  username            String         @unique
+  passwordHash        String?        @map("password_hash")
+  firstName           String         @map("first_name")
+  lastName            String         @map("last_name")
+  phone               String?
+  clientTier          String         @default("Aureus Sovereign Private Client") @map("client_tier")
+  kycLevel            String         @default("Tier 3 (BVN & ID Verified)") @map("kyc_level")
+  emailVerified       Boolean        @default(false) @map("email_verified")
+  verificationCode    String?        @map("verification_code")
+  verificationExpires DateTime?      @map("verification_expires")
+  hasTransactionPin   Boolean        @default(true) @map("has_transaction_pin")
+  transactionPinHash  String?        @map("transaction_pin_hash")
+  createdAt           DateTime       @default(now()) @map("created_at")
+  updatedAt           DateTime       @updatedAt @map("updated_at")
+
+  profile             Profile?
+  accounts            Account[]
+  beneficiaries       Beneficiary[]
+  cards               PaymentCard[]
+  bills               BillPayment[]
+  savingsGoals        SavingsGoal[]
+  notifications       Notification[]
+  sessions            Session[]
+  supportTickets      SupportTicket[]
+
+  @@map("users")
+}
+
+model Profile {
+  id                  String         @id @default(cuid())
+  userId              String         @unique @map("user_id")
+  user                User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title               String         @default("Managing Partner & Principal")
+  avatarUrl           String?        @map("avatar_url")
+  memberSince         String         @default("2021") @map("member_since")
+  accountNumberMask   String         @default("•••• 8924") @map("account_number_mask")
+  rmName              String         @default("Marcus Sterling") @map("rm_name")
+  rmTitle             String         @default("Senior VP, Private Banking & Wealth") @map("rm_title")
+  rmEmail             String         @default("marcus.sterling@aureusbank.com") @map("rm_email")
+  rmPhone             String         @default("+1 (212) 555-0199") @map("rm_phone")
+  rmOffice            String         @default("540 Madison Ave, New York, NY") @map("rm_office")
+  updatedAt           DateTime       @updatedAt @map("updated_at")
+
+  @@map("profiles")
+}
+
+model Account {
+  id                  String         @id @default(cuid())
+  userId              String         @map("user_id")
+  user                User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                String
+  type                AccountType    @default(checking)
+  accountNumber       String         @unique @map("account_number")
+  routingNumber       String         @default("021000089") @map("routing_number")
+  iban                String?
+  swiftBic            String?        @map("swift_bic")
+  balance             Float          @default(0.0)
+  availableBalance    Float          @default(0.0) @map("available_balance")
+  currency            CurrencyCode   @default(USD)
+  interestRate        Float?         @map("interest_rate")
+  colorTheme          String         @default("emerald") @map("color_theme")
+  
+  // CRITICAL: Automatically provisioned sovereign wallet address for USD accounts
+  walletAddress       String?        @unique @map("wallet_address")
+  isWalletProvisioned Boolean        @default(false) @map("is_wallet_provisioned")
+  
+  createdAt           DateTime       @default(now()) @map("created_at")
+  updatedAt           DateTime       @updatedAt @map("updated_at")
+
+  transactions        Transaction[]
+  paymentCards        PaymentCard[]
+
+  @@map("accounts")
+}
+
+model Transaction {
+  id                  String            @id @default(cuid())
+  accountId           String            @map("account_id")
+  account             Account           @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  date                String
+  time                String
+  merchant            String
+  category            String            @default("Transfers")
+  amount              Float
+  currency            CurrencyCode      @default(USD)
+  status              TransactionStatus @default(settled)
+  iconType            String            @default("send") @map("icon_type")
+  paymentMethod       String            @default("Fedwire Realtime") @map("payment_method")
+  referenceNumber     String            @unique @map("reference_number")
+  notes               String?
+  recipientWallet     String?           @map("recipient_wallet")
+  createdAt           DateTime          @default(now()) @map("created_at")
+
+  @@map("transactions")
+}
+
+model Beneficiary {
+  id                  String         @id @default(cuid())
+  userId              String         @map("user_id")
+  user                User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                String
+  email               String
+  bankName            String         @map("bank_name")
+  accountNumber       String         @map("account_number")
+  routingNumber       String         @map("routing_number")
+  avatarUrl           String?        @map("avatar_url")
+  initials            String
+  category            String         @default("Business")
+  verified            Boolean        @default(true)
+  walletAddress       String?        @map("wallet_address")
+  lastTransferDate    String?        @map("last_transfer_date")
+  createdAt           DateTime       @default(now()) @map("created_at")
+
+  @@map("beneficiaries")
+}
+
+model PaymentCard {
+  id                  String         @id @default(cuid())
+  userId              String         @map("user_id")
+  user                User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  linkedAccountId     String?        @map("linked_account_id")
+  linkedAccount       Account?       @relation(fields: [linkedAccountId], references: [id], onDelete: SetNull)
+  nameOnCard          String         @map("name_on_card")
+  cardType            String         @default("physical") @map("card_type")
+  tier                String         @default("Obsidian Black Metal")
+  last4               String
+  fullNumberMasked    String         @map("full_number_masked")
+  fullNumberRevealed  String         @map("full_number_revealed")
+  expiry              String
+  cvv                 String
+  billingZip          String         @map("billing_zip")
+  isFrozen            Boolean        @default(false) @map("is_frozen")
+  contactlessEnabled  Boolean        @default(true) @map("contactless_enabled")
+  onlinePaymentsEnabled Boolean      @default(true) @map("online_payments_enabled")
+  atmWithdrawalsEnabled Boolean      @default(true) @map("atm_withdrawals_enabled")
+  monthlyLimit        Float          @default(250000) @map("monthly_limit")
+  spentThisMonth      Float          @default(0) @map("spent_this_month")
+  dailyAtmLimit       Float          @default(10000) @map("daily_atm_limit")
+  atmSpentToday       Float          @default(0) @map("atm_spent_today")
+  pin                 String         @default("9482")
+  createdAt           DateTime       @default(now()) @map("created_at")
+
+  @@map("payment_cards")
+}
+
+model BillPayment {
+  id                  String         @id @default(cuid())
+  userId              String         @map("user_id")
+  user                User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  billerName          String         @map("biller_name")
+  category            String
+  accountNumber       String         @map("account_number")
+  amount              Float
+  dueDate             String         @map("due_date")
+  frequency           String         @default("Monthly")
+  autoPay             Boolean        @default(true) @map("auto_pay")
+  status              String         @default("scheduled")
+  lastPaidDate        String?        @map("last_paid_date")
+  createdAt           DateTime       @default(now()) @map("created_at")
+
+  @@map("bill_payments")
+}
+
+model SavingsGoal {
+  id                  String         @id @default(cuid())
+  userId              String         @map("user_id")
+  user                User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title               String
+  targetAmount        Float          @map("target_amount")
+  currentAmount       Float          @map("current_amount")
+  currency            CurrencyCode   @default(USD)
+  targetDate          String         @map("target_date")
+  category            String
+  monthlyContribution Float          @map("monthly_contribution")
+  color               String
+  createdAt           DateTime       @default(now()) @map("created_at")
+
+  @@map("savings_goals")
+}
+
+model Notification {
+  id                  String         @id @default(cuid())
+  userId              String         @map("user_id")
+  user                User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title               String
+  message             String
+  timestamp           String
+  read                Boolean        @default(false)
+  type                String         @default("transaction")
+  createdAt           DateTime       @default(now()) @map("created_at")
+
+  @@map("notifications")
+}
+
+model Session {
+  id                  String         @id @default(cuid())
+  userId              String         @map("user_id")
+  user                User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device              String
+  browser             String
+  location            String
+  ipAddress           String         @map("ip_address")
+  lastActive          String         @map("last_active")
+  isCurrent           Boolean        @default(false) @map("is_current")
+  createdAt           DateTime       @default(now()) @map("created_at")
+
+  @@map("sessions")
+}
+
+model SupportTicket {
+  id                  String         @id
+  userId              String         @map("user_id")
+  user                User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subject             String
+  category            String
+  priority            String
+  status              String
+  assignedAgent       String         @map("assigned_agent")
+  description         String
+  conversationId      String?        @map("conversation_id")
+  createdAt           DateTime       @default(now()) @map("created_at")
+  updatedAt           DateTime       @updatedAt @map("updated_at")
+
+  @@map("support_tickets")
+}
+```
+
+# ------------------------------------------------------------------------------
+# 4. SUPABASE / POSTGRESQL DDL MIGRATION SCRIPT
+# ------------------------------------------------------------------------------
+
+```sql
+-- Enable UUID extension
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- Custom Types
+DO $$ BEGIN
+  CREATE TYPE currency_code AS ENUM ('USD', 'EUR', 'GBP', 'CHF', 'NGN');
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE account_type AS ENUM ('checking', 'savings', 'investment', 'multicurrency');
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE transaction_status AS ENUM ('settled', 'pending', 'processing');
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
+
+-- 1. Users Table
+CREATE TABLE IF NOT EXISTS public.users (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  email TEXT UNIQUE NOT NULL,
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT,
+  first_name TEXT NOT NULL,
+  last_name TEXT NOT NULL,
+  phone TEXT,
+  client_tier TEXT DEFAULT 'Aureus Sovereign Private Client',
+  kyc_level TEXT DEFAULT 'Tier 3 (BVN & ID Verified)',
+  email_verified BOOLEAN DEFAULT false,
+  verification_code VARCHAR(6),
+  verification_expires TIMESTAMPTZ,
+  has_transaction_pin BOOLEAN DEFAULT true,
+  transaction_pin_hash TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 2. Profiles Table
+CREATE TABLE IF NOT EXISTS public.profiles (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID UNIQUE NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  title TEXT DEFAULT 'Managing Partner & Principal',
+  avatar_url TEXT,
+  member_since TEXT DEFAULT '2021',
+  account_number_mask TEXT DEFAULT '•••• 8924',
+  rm_name TEXT DEFAULT 'Marcus Sterling',
+  rm_title TEXT DEFAULT 'Senior VP, Private Banking & Wealth',
+  rm_email TEXT DEFAULT 'marcus.sterling@aureusbank.com',
+  rm_phone TEXT DEFAULT '+1 (212) 555-0199',
+  rm_office TEXT DEFAULT '540 Madison Ave, New York, NY',
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 3. Accounts Table (with USD wallet address auto-provisioning)
+CREATE TABLE IF NOT EXISTS public.accounts (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  type account_type DEFAULT 'checking',
+  account_number TEXT UNIQUE NOT NULL,
+  routing_number TEXT DEFAULT '021000089',
+  iban TEXT,
+  swift_bic TEXT,
+  balance NUMERIC(18,2) DEFAULT 0.00,
+  available_balance NUMERIC(18,2) DEFAULT 0.00,
+  currency currency_code DEFAULT 'USD',
+  interest_rate NUMERIC(5,2),
+  color_theme TEXT DEFAULT 'emerald',
+  wallet_address TEXT UNIQUE,
+  is_wallet_provisioned BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 4. Transactions Table
+CREATE TABLE IF NOT EXISTS public.transactions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  account_id UUID NOT NULL REFERENCES public.accounts(id) ON DELETE CASCADE,
+  date TEXT NOT NULL,
+  time TEXT NOT NULL,
+  merchant TEXT NOT NULL,
+  category TEXT DEFAULT 'Transfers',
+  amount NUMERIC(18,2) NOT NULL,
+  currency currency_code DEFAULT 'USD',
+  status transaction_status DEFAULT 'settled',
+  icon_type TEXT DEFAULT 'send',
+  payment_method TEXT DEFAULT 'Fedwire Realtime',
+  reference_number TEXT UNIQUE NOT NULL,
+  notes TEXT,
+  recipient_wallet TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 5. Beneficiaries Table
+CREATE TABLE IF NOT EXISTS public.beneficiaries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  bank_name TEXT NOT NULL,
+  account_number TEXT NOT NULL,
+  routing_number TEXT NOT NULL,
+  avatar_url TEXT,
+  initials VARCHAR(4) NOT NULL,
+  category TEXT DEFAULT 'Business',
+  verified BOOLEAN DEFAULT true,
+  wallet_address TEXT,
+  last_transfer_date TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 6. Payment Cards Table
+CREATE TABLE IF NOT EXISTS public.payment_cards (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  linked_account_id UUID REFERENCES public.accounts(id) ON DELETE SET NULL,
+  name_on_card TEXT NOT NULL,
+  card_type TEXT DEFAULT 'physical',
+  tier TEXT DEFAULT 'Obsidian Black Metal',
+  last4 VARCHAR(4) NOT NULL,
+  full_number_masked TEXT NOT NULL,
+  full_number_revealed TEXT NOT NULL,
+  expiry VARCHAR(5) NOT NULL,
+  cvv VARCHAR(4) NOT NULL,
+  billing_zip TEXT NOT NULL,
+  is_frozen BOOLEAN DEFAULT false,
+  contactless_enabled BOOLEAN DEFAULT true,
+  online_payments_enabled BOOLEAN DEFAULT true,
+  atm_withdrawals_enabled BOOLEAN DEFAULT true,
+  monthly_limit NUMERIC(18,2) DEFAULT 250000.00,
+  spent_this_month NUMERIC(18,2) DEFAULT 0.00,
+  daily_atm_limit NUMERIC(18,2) DEFAULT 10000.00,
+  atm_spent_today NUMERIC(18,2) DEFAULT 0.00,
+  pin TEXT DEFAULT '9482',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 7. Bill Payments Table
+CREATE TABLE IF NOT EXISTS public.bill_payments (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  biller_name TEXT NOT NULL,
+  category TEXT NOT NULL,
+  account_number TEXT NOT NULL,
+  amount NUMERIC(18,2) NOT NULL,
+  due_date TEXT NOT NULL,
+  frequency TEXT DEFAULT 'Monthly',
+  auto_pay BOOLEAN DEFAULT true,
+  status TEXT DEFAULT 'scheduled',
+  last_paid_date TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 8. Savings Goals Table
+CREATE TABLE IF NOT EXISTS public.savings_goals (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  target_amount NUMERIC(18,2) NOT NULL,
+  current_amount NUMERIC(18,2) NOT NULL,
+  currency currency_code DEFAULT 'USD',
+  target_date TEXT NOT NULL,
+  category TEXT NOT NULL,
+  monthly_contribution NUMERIC(18,2) DEFAULT 0.00,
+  color TEXT DEFAULT 'emerald',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 9. Notifications Table
+CREATE TABLE IF NOT EXISTS public.notifications (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  timestamp TEXT NOT NULL,
+  read BOOLEAN DEFAULT false,
+  type TEXT DEFAULT 'transaction',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 10. Sessions Table
+CREATE TABLE IF NOT EXISTS public.sessions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  device TEXT NOT NULL,
+  browser TEXT NOT NULL,
+  location TEXT NOT NULL,
+  ip_address TEXT NOT NULL,
+  last_active TEXT NOT NULL,
+  is_current BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_accounts_user ON public.accounts(user_id);
+CREATE INDEX IF NOT EXISTS idx_accounts_currency ON public.accounts(currency);
+CREATE INDEX IF NOT EXISTS idx_transactions_account ON public.transactions(account_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_date ON public.transactions(date);
+CREATE INDEX IF NOT EXISTS idx_cards_user ON public.payment_cards(user_id);
+CREATE INDEX IF NOT EXISTS idx_bills_user ON public.bill_payments(user_id);
+CREATE INDEX IF NOT EXISTS idx_goals_user ON public.savings_goals(user_id);
+CREATE INDEX IF NOT EXISTS idx_beneficiaries_user ON public.beneficiaries(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON public.notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON public.sessions(user_id);
+
+# ------------------------------------------------------------------------------
+# 5. RECOMMENDED API ENDPOINTS & PAYLOAD SHAPES
+# ------------------------------------------------------------------------------
+# The frontend connects to the following endpoints via `src/services/bankingService.ts`
+# and `src/services/authService.ts`:
+#
+# Authentication:
+#   POST /api/auth/register       -> { email, username, firstName, lastName, password }
+#   POST /api/auth/verify-email   -> { email, code: "123456" }
+#   POST /api/auth/resend-code    -> { email }
+#   POST /api/auth/login          -> { email, password }
+#   GET  /api/auth/me             -> Returns current User & Profile
+#   POST /api/auth/logout         -> Terminates session
+#
+# Banking & Ledger:
+#   GET  /api/banking/dashboard   -> Consolidated { accounts, transactions, cards, bills, goals, beneficiaries }
+#   GET  /api/banking/accounts    -> Returns all user accounts
+#   POST /api/banking/accounts    -> { name, type, currency, initialDeposit, colorTheme }
+#                                    (Auto-provisions wallet_address if currency == 'USD')
+#   GET  /api/banking/transactions-> Returns transaction history
+#   POST /api/banking/transfers   -> { sourceAccountId, beneficiaryId, amount, speed, memo }
+#                                    (Debits account balance and inserts transaction)
+#   GET  /api/banking/cards       -> Returns Obsidian & Titanium cards
+#   PATCH/api/banking/cards/:id   -> { isFrozen, contactlessEnabled, onlinePaymentsEnabled, monthlyLimit }
+#   POST /api/banking/cards       -> Issues new virtual / physical card
+#   GET  /api/banking/beneficiaries -> Counterparty address book
+#   POST /api/banking/beneficiaries -> Adds verified counterparty
+#   DELETE /api/banking/beneficiaries/:id -> Removes counterparty
+#   GET  /api/banking/bills       -> Scheduled bills & executive invoices
+#   POST /api/banking/bills/:id/pay -> Pays bill and settles transaction
+#   PATCH/api/banking/bills/:id/autopay -> Toggles autopay status
+#   GET  /api/banking/goals       -> Capital goals & private wealth milestones
+#   POST /api/banking/goals/:id/deposit -> Allocates funds into goal
+#   GET  /api/banking/sessions    -> Active security devices
+#   DELETE /api/banking/sessions/:id -> Revokes remote session
+#
+# Real-Time Event Stream (SSE or Supabase Realtime):
+#   GET  /api/realtime
+#   Events emitted: 'account:created', 'account:updated', 'transaction:created', 
+#                   'transfer:executed', 'card:updated', 'bill:paid', 'goal:updated'

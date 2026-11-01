@@ -9,6 +9,7 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { BankStatement } from '../types/banking';
+import { INITIAL_TAX_DOCUMENTS } from '../data/mockData';
 
 interface StatementsViewProps {
   statements: BankStatement[];
@@ -27,12 +28,8 @@ export const StatementsView: React.FC<StatementsViewProps> = ({
     setTimeout(() => setDownloadSuccess(null), 2500);
   };
 
-  const taxDocuments = [
-    { name: '2025 Consolidated Form 1099-INT (Interest Yield)', size: '420 KB', date: 'Jan 31, 2026' },
-    { name: '2025 Form 1099-B (Proceeds from Broker & Barter)', size: '890 KB', date: 'Feb 15, 2026' },
-    { name: '2025 Foreign Bank & Financial Accounts (FBAR FinCEN 114)', size: '310 KB', date: 'Apr 02, 2026' },
-    { name: '2025 Aureus Sovereign Annual Audit Report', size: '2.4 MB', date: 'Mar 10, 2026' },
-  ];
+  const taxDocuments = INITIAL_TAX_DOCUMENTS;
+
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">

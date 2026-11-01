@@ -3,7 +3,9 @@
  * Clean HTTP client connection point for separate real backend.
  */
 
-export const API_BASE_URL = (typeof process !== 'undefined' && process.env?.VITE_API_URL) || '/api';
+export const API_BASE_URL =
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL) ||
+  '/api';
 
 export interface ApiResponse<T = any> {
   success: boolean;
@@ -27,6 +29,15 @@ export async function apiRequest<T = any>(
     headers.set('Content-Type', 'application/json');
   }
   headers.set('Accept', 'application/json');
+
+  // Automatically attach Bearer token if present
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('aureus_auth_token');
+    if (token && !headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+  }
+
 
   try {
     const response = await fetch(url, {

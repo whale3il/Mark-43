@@ -103,4 +103,8 @@ export interface AccountCreationPayload {
   accountNickname: string;
   initialDeposit: number;
   dailyTransferLimit: number;
+  name?: string;
+  type?: 'savings' | 'checking' | 'multicurrency' | 'investment';
+  colorTheme?: string;
 }
+
