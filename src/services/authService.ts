@@ -10,28 +10,20 @@ import {
 import { apiRequest } from './apiClient';
 import { USER_PROFILE } from '../data/mockData';
 
-/**
- * AuthService provides clean, typed frontend API connection points
- * for the separate real backend endpoints:
- * - POST /api/auth/register
- * - POST /api/auth/verify-email
- * - POST /api/auth/resend-code
- * - POST /api/auth/login
- * - POST /api/auth/google
- * - POST /api/auth/forgot-password
- * - GET  /api/auth/me
- * - POST /api/auth/logout
- *
- * This frontend-only service contains NO fake database, NO simulated user registry,
- * and NO client-side password hashing/verification.
- */
+// Helper function to safely extract error message as a string
+function formatErrorMessage(error: any): string | undefined {
+  if (!error) return undefined;
+  if (typeof error === 'string') return error;
+  if (typeof error === 'object' && error.message) return error.message;
+  return 'An unexpected error occurred.';
+}
+
 export class AuthService {
   /**
-   * Connection point: POST /api/auth/register
-   * Dispatches client-validated registration credentials to the backend.
+   * Connection point: POST /api/auth/register (or /signup)
    */
   static async register(payload: UserRegistrationPayload): Promise<AuthApiResponse> {
-    const res = await apiRequest<AuthApiResponse>('/auth/register', {
+    const res = await apiRequest<{ message: string; user?: any; userId?: string }>('/auth/register', {
       method: 'POST',
       body: JSON.stringify(payload)
     });
@@ -40,71 +32,72 @@ export class AuthService {
       return {
         success: true,
         user: res.data.user,
-        token: res.data.token,
         message: res.data.message || 'Registration details received. Verification required.'
       };
     }
 
     return {
       success: false,
-      error: res.error as any
+      error: formatErrorMessage(res.error)
     };
   }
 
   /**
-   * Connection point: POST /api/auth/verify-email
-   * Submits the 6-digit verification code to the backend.
+   * Connection point: POST /api/auth/verify-email (or /verify-otp)
    */
   static async verifyEmail(payload: VerifyEmailPayload): Promise<AuthApiResponse> {
-    const res = await apiRequest<AuthApiResponse>('/auth/verify-email', {
+    const bodyPayload = {
+      email: payload.email,
+      token: (payload as any).code || (payload as any).token
+    };
+
+    const res = await apiRequest<{ message: string; user: any; session: any; token?: string }>('/auth/verify-email', {
       method: 'POST',
-      body: JSON.stringify(payload)
+      body: JSON.stringify(bodyPayload)
     });
 
     if (res.success && res.data) {
       return {
         success: true,
         user: res.data.user,
-        token: res.data.token,
+        token: res.data.session?.access_token || res.data.token,
         message: res.data.message || 'Verification successful.'
       };
     }
 
     return {
       success: false,
-      error: res.error as any
+      error: formatErrorMessage(res.error)
     };
   }
 
   /**
    * Connection point: POST /api/auth/resend-code
-   * Requests a new 6-digit verification code from the backend.
    */
   static async resendVerificationCode(email: string): Promise<AuthApiResponse> {
-    const res = await apiRequest<AuthApiResponse>('/auth/resend-code', {
-      method: 'POST',
-      body: JSON.stringify({ email })
-    });
+  const res = await apiRequest<{ message: string }>('/auth/resend-otp', {
+    method: 'POST',
+    body: JSON.stringify({ email, type: 'signup' })
+  });
 
-    if (res.success && res.data) {
-      return {
-        success: true,
-        message: res.data.message || 'New verification code dispatched.'
-      };
-    }
-
+  if (res.success && res.data) {
     return {
-      success: false,
-      error: res.error as any
+      success: true,
+      message: res.data.message || 'New verification code dispatched.'
     };
   }
 
+  return {
+    success: false,
+    error: formatErrorMessage(res.error)
+  };
+}
+
   /**
    * Connection point: POST /api/auth/login
-   * Authenticates client credentials with the backend.
    */
   static async login(payload: LoginPayload): Promise<AuthApiResponse> {
-    const res = await apiRequest<AuthApiResponse>('/auth/login', {
+    const res = await apiRequest<{ message: string; user: any; session: any; token?: string }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify(payload)
     });
@@ -113,46 +106,60 @@ export class AuthService {
       return {
         success: true,
         user: res.data.user,
-        token: res.data.token,
+        token: res.data.session?.access_token || res.data.token,
         message: res.data.message
       };
     }
 
     return {
       success: false,
-      error: res.error as any
+      error: formatErrorMessage(res.error)
     };
   }
 
   /**
    * Connection point: POST /api/auth/google
-   * Forwards Google authentication token to the backend.
    */
-  static async loginWithGoogle(payload: GoogleAuthPayload): Promise<AuthApiResponse> {
-    const res = await apiRequest<AuthApiResponse>('/auth/google', {
+// src/services/authService.ts
+
+  static async googleSignIn(accessToken: string) {
+    const res = await apiRequest<any>('/auth/google', {
       method: 'POST',
-      body: JSON.stringify(payload)
+      body: { accessToken },
     });
 
     if (res.success && res.data) {
       return {
         success: true,
-        user: res.data.user,
-        token: res.data.token
+        data: res.data.user || res.data,
+        token: res.data.token,
+        message: 'Google sign-in successful.',
       };
     }
 
     return {
       success: false,
-      error: res.error as any
+      error: typeof res.error === 'string'
+        ? res.error
+        : (res.error as any)?.message || 'Google sign-in failed.',
     };
   }
+
+static async syncGoogleUser(accessToken: string) {
+  return apiRequest<AuthUser>("/auth/google/sync", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+}
+
 
   /**
    * Connection point: POST /api/auth/forgot-password
    */
   static async forgotPassword(payload: ForgotPasswordPayload): Promise<AuthApiResponse> {
-    const res = await apiRequest<AuthApiResponse>('/auth/forgot-password', {
+    const res = await apiRequest<{ message: string }>('/auth/forgot-password', {
       method: 'POST',
       body: JSON.stringify(payload)
     });
@@ -166,13 +173,12 @@ export class AuthService {
 
     return {
       success: false,
-      error: res.error as any
+      error: formatErrorMessage(res.error)
     };
   }
 
   /**
    * Connection point: GET /api/auth/me
-   * Fetches currently authenticated session user from the backend.
    */
   static async getCurrentUser(): Promise<AuthUser | null> {
     const res = await apiRequest<AuthUser>('/auth/me');
@@ -184,15 +190,13 @@ export class AuthService {
 
   /**
    * Connection point: POST /api/auth/logout
-   * Notifies backend of session termination.
    */
   static async logout(): Promise<void> {
     await apiRequest('/auth/logout', { method: 'POST' });
   }
 
   /**
-   * Pure frontend helper for 1-click preview and testing of the private banking UI.
-   * Does NOT interact with localStorage, databases, or backend services.
+   * Pure frontend demo user helper
    */
   static getDemoUser(): AuthUser {
     return {

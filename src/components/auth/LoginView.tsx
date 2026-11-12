@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useGoogleLogin } from '@react-oauth/google';
 import {
   Lock,
   Mail,
@@ -20,6 +21,10 @@ import { GoogleIcon } from './GoogleIcon';
 import { AuthService } from '../../services/authService';
 import { AuthUser, LoginPayload } from '../../types/auth';
 import { USER_PROFILE } from '../../data/mockData';
+import { supabase } from "../../lib/supbase";
+
+
+
 
 interface LoginViewProps {
   onSuccess: (user: AuthUser) => void;
@@ -27,6 +32,24 @@ interface LoginViewProps {
   theme: 'dark' | 'light';
   toggleTheme: () => void;
 }
+
+// useEffect(() => {
+//   const completeGoogleLogin = async () => {
+//     const { data, error } = await supabase.auth.getSession();
+
+//     if (error || !data.session) {
+//       console.error("Google authentication failed:", error);
+//       return;
+//     }
+
+//     const token = data.session.access_token;
+
+//     // Send this Supabase access token to your Express backend
+//     // to verify the user and synchronize their Prisma profile.
+//   };
+
+//   completeGoogleLogin();
+// }, []);
 
 export const LoginView: React.FC<LoginViewProps> = ({
   onSuccess,
@@ -40,6 +63,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
 
+
   // States
   const [loading, setLoading] = useState(false);
   const [loginSuccess, setLoginSuccess] = useState<AuthUser | null>(null);
@@ -48,9 +72,9 @@ export const LoginView: React.FC<LoginViewProps> = ({
     message: string;
   } | null>(null);
 
-  // Google Auth
-  const [googleLoading, setGoogleLoading] = useState(false);
-  const [googleError, setGoogleError] = useState<string | null>(null);
+  // Google Auth States
+  // const [googleLoading, setGoogleLoading] = useState(false);
+  // const [googleError, setGoogleError] = useState<string | null>(null);
 
   // Forgot Password Modal
   const [showForgotPassword, setShowForgotPassword] = useState(false);
@@ -62,134 +86,138 @@ export const LoginView: React.FC<LoginViewProps> = ({
   // Email verification required alert
   const [showVerificationAlert, setShowVerificationAlert] = useState(false);
 
+  
+  // Google Sign In Hook
+
+const [googleLoading, setGoogleLoading] = useState(false);
+const [googleError, setGoogleError] = useState<string | null>(null);
+
+const triggerGoogleAuth = async () => {
+  setGoogleLoading(true);
+  setGoogleError(null);
+
+  try {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: window.location.origin,
+        queryParams: {
+          prompt: "select_account",
+        },
+      },
+    });
+
+    if (error) throw error;
+  } catch (error) {
+    setGoogleError(
+      error instanceof Error
+        ? error.message
+        : "Google authentication failed."
+    );
+    setGoogleLoading(false);
+  }
+};
+
   // Handle Form Submit
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setShowVerificationAlert(false);
+  e.preventDefault();
+  setError(null);
+  setShowVerificationAlert(false);
 
-    if (!identifier.trim()) {
-      setError({
-        code: 'VALIDATION_ERROR',
-        message: 'Please enter your registered email address or username.'
-      });
-      return;
-    }
-    if (!password) {
-      setError({
-        code: 'VALIDATION_ERROR',
-        message: 'Please provide your vault access password.'
-      });
-      return;
-    }
+  if (!identifier.trim()) {
+    setError({
+      code: 'VALIDATION_ERROR',
+      message: 'Please enter your registered email address or username.'
+    });
+    return;
+  }
+  if (!password) {
+    setError({
+      code: 'VALIDATION_ERROR',
+      message: 'Please provide your vault access password.'
+    });
+    return;
+  }
 
-    setLoading(true);
+  setLoading(true);
 
-    const payload: LoginPayload = {
-      identifier: identifier.trim(),
-      password,
-      rememberMe
-    };
-
-    try {
-      const response = await AuthService.login(payload);
-
-      if (response.success && response.user) {
-        setLoginSuccess(response.user);
-        setTimeout(() => {
-          onSuccess(response.user!);
-        }, 500);
-      } else {
-        if (response.error?.code === 'EMAIL_VERIFICATION_REQUIRED') {
-          setShowVerificationAlert(true);
-        }
-        if (response.error && response.error.code !== 'NETWORK_ERROR') {
-          setError({
-            code: response.error.code || 'INVALID_CREDENTIALS',
-            message:
-              response.error.message ||
-              'Invalid credentials. Please verify your email/username or reset your password.'
-          });
-        } else {
-          // Frontend client login fallback (when backend server is not yet attached)
-          const fallbackUser: AuthUser = {
-            id: `usr-${Date.now()}`,
-            firstName: identifier.includes('@') ? identifier.split('@')[0] : identifier,
-            lastName: 'Client',
-            username: identifier.toLowerCase().replace(/[@.]/g, '_'),
-            name: identifier.includes('@') ? identifier.split('@')[0] : identifier,
-            email: identifier.includes('@') ? identifier : `${identifier}@aureusbank.com`,
-            phone: USER_PROFILE.phone,
-            title: USER_PROFILE.title,
-            clientTier: USER_PROFILE.clientTier,
-            kycLevel: 'Tier 3 (BVN & ID Verified)',
-            hasTransactionPin: true,
-            pinMasked: '••••',
-            primaryAccountNumber: '8940 3120 4821',
-            accountNumberMasked: USER_PROFILE.accountNumberMasked,
-            memberSince: '2023',
-            avatarUrl: USER_PROFILE.avatarUrl,
-            emailVerified: true,
-            relationshipManager: USER_PROFILE.relationshipManager
-          };
-          setLoginSuccess(fallbackUser);
-          setTimeout(() => {
-            onSuccess(fallbackUser);
-          }, 400);
-        }
-      }
-    } catch {
-      setError({
-        code: 'NETWORK_ERROR',
-        message: 'Network error connecting to private banking gateway. Please check your connection and retry.'
-      });
-    } finally {
-      setLoading(false);
-    }
+  const payload: LoginPayload = {
+    email: identifier.trim(),
+    password,
+    rememberMe
   };
 
-  // Google Sign In
-  const handleGoogleSignIn = async () => {
-    if (googleLoading || loading) return;
-    setGoogleLoading(true);
-    setGoogleError(null);
-    setError(null);
+  try {
+    const response = await AuthService.login(payload);
 
-    try {
-      const response = await AuthService.loginWithGoogle({
-        token: `google-oauth-${Date.now()}`
-      });
+    if (response.success && response.user) {
+      setLoginSuccess(response.user);
+      setTimeout(() => {
+        onSuccess(response.user!);
+      }, 500);
+    } else {
+      // Check for specific error code safely using type assertion
+      if ((response.error as any)?.code === 'EMAIL_VERIFICATION_REQUIRED') {
+        setShowVerificationAlert(true);
+      }
 
-      if (response.success && response.user) {
-        setLoginSuccess(response.user);
-        setTimeout(() => {
-          onSuccess(response.user!);
-        }, 500);
+      if (response.error && (response.error as any)?.code !== 'NETWORK_ERROR') {
+        setError({
+          code: (response.error as any)?.code || 'INVALID_CREDENTIALS',
+          message:
+            (response.error as any)?.message ||
+            (typeof response.error === 'string' ? response.error : undefined) ||
+            'Invalid credentials. Please verify your email/username or reset your password.'
+        });
       } else {
-        const demo = AuthService.getDemoUser();
-        setLoginSuccess(demo);
+        // Frontend client login fallback (when backend server is not yet attached)
+        const fallbackUser: AuthUser = {
+          id: `usr-${Date.now()}`,
+          firstName: identifier.includes('@') ? identifier.split('@')[0] : identifier,
+          lastName: 'Client',
+          username: identifier.toLowerCase().replace(/[@.]/g, '_'),
+          name: identifier.includes('@') ? identifier.split('@')[0] : identifier,
+          email: identifier.includes('@') ? identifier : `${identifier}@aureusbank.com`,
+          phone: USER_PROFILE.phone,
+          title: USER_PROFILE.title,
+          clientTier: USER_PROFILE.clientTier,
+          kycLevel: 'Tier 3 (BVN & ID Verified)',
+          hasTransactionPin: true,
+          pinMasked: '••••',
+          primaryAccountNumber: '8940 3120 4821',
+          accountNumberMasked: USER_PROFILE.accountNumberMasked,
+          memberSince: '2023',
+          avatarUrl: USER_PROFILE.avatarUrl,
+          emailVerified: true,
+          relationshipManager: USER_PROFILE.relationshipManager
+        };
+        setLoginSuccess(fallbackUser);
         setTimeout(() => {
-          onSuccess(demo);
+          onSuccess(fallbackUser);
         }, 400);
       }
-    } catch {
-      setGoogleError('Failed to communicate with Google Identity Services. Please use email/password.');
-    } finally {
-      setGoogleLoading(false);
     }
-  };
+  } catch {
+    setError({
+      code: 'NETWORK_ERROR',
+      message: 'Network error connecting to private banking gateway. Please check your connection and retry.'
+    });
+  } finally {
+    setLoading(false);
+  }
+};
 
   // 1-Click Demo Login
-  const handleDemoLogin = () => {
-    setLoading(true);
-    setError(null);
-    const demoUser = AuthService.getDemoUser();
-    setLoginSuccess(demoUser);
-    setTimeout(() => {
-      onSuccess(demoUser);
-    }, 400);
-    setLoading(false);
-  };
+  // const handleDemoLogin = () => {
+  //   setLoading(true);
+  //   setError(null);
+  //   const demoUser = AuthService.getDemoUser();
+  //   setLoginSuccess(demoUser);
+  //   setTimeout(() => {
+  //     onSuccess(demoUser);
+  //   }, 400);
+  //   setLoading(false);
+  // };
 
   // Forgot Password Submit
   const handleForgotPasswordSubmit = async (e: React.FormEvent) => {
@@ -200,7 +228,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
     setForgotError(null);
 
     try {
-      const response = await AuthService.forgotPassword({ identifier: forgotIdentifier.trim() });
+      const response = await AuthService.forgotPassword({ email: forgotIdentifier.trim() });
       if (response.success) {
         setForgotSentMessage(response.message || 'Recovery security link dispatched.');
       } else {
@@ -229,12 +257,12 @@ export const LoginView: React.FC<LoginViewProps> = ({
               isLight ? 'bg-white border-slate-200 shadow-sm text-emerald-600' : 'bg-neutral-900 border-neutral-800 shadow-md text-emerald-400'
             }`}
           >
-            <span className="text-base font-bold tracking-wider font-mono">AV</span>
+            <span className="text-base font-bold tracking-wider font-mono">WV</span>
           </div>
           <div>
             <div className="flex items-center gap-2">
               <span className={`text-base font-bold tracking-tight font-sans ${isLight ? 'text-slate-900' : 'text-neutral-100'}`}>
-                Aureus Wealth
+                WhalesVault
               </span>
               <span
                 className={`text-[10px] font-medium tracking-wider uppercase px-1.5 py-0.5 rounded border font-mono ${
@@ -266,7 +294,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
             {isLight ? <Moon className="w-4 h-4 text-sky-500" /> : <Sun className="w-4 h-4 text-amber-400" />}
           </button>
 
-          <button
+          {/* <button
             type="button"
             onClick={handleDemoLogin}
             className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all font-mono ${
@@ -277,7 +305,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
           >
             <Sparkles className="w-3.5 h-3.5 text-amber-500" />
             <span>1-Click Demo Login</span>
-          </button>
+          </button> */}
         </div>
       </header>
 
@@ -312,6 +340,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
             <h1 className={`text-2xl sm:text-3xl font-bold tracking-tight font-sans ${isLight ? 'text-slate-900' : 'text-neutral-100'}`}>
               Sign In to Your Vault
             </h1>
+
             <p className={`text-xs mt-1 max-w-sm mx-auto ${isLight ? 'text-slate-500' : 'text-neutral-400'}`}>
               Access your executive portfolio using your registered email address or username.
             </p>
@@ -366,24 +395,27 @@ export const LoginView: React.FC<LoginViewProps> = ({
 
           {/* Prominent Continue with Google Button */}
           <div className="mb-5">
-            <button
-              type="button"
-              onClick={handleGoogleSignIn}
-              disabled={googleLoading || loading}
-              className={`w-full py-2.5 px-4 rounded-xl border text-xs font-semibold flex items-center justify-center gap-3 transition-all disabled:opacity-50 group ${
-                isLight
-                  ? 'border-slate-300 bg-white hover:bg-slate-50 text-slate-700 shadow-xs'
-                  : 'border-neutral-700 bg-neutral-950/70 hover:bg-neutral-900 text-neutral-200 shadow-sm hover:border-neutral-600'
-              }`}
-            >
-              {googleLoading ? (
-                <RefreshCw className="w-4 h-4 animate-spin text-neutral-400" />
-              ) : (
-                <GoogleIcon className="w-4 h-4" />
-              )}
-              <span>Continue with Google</span>
-            </button>
-
+           <button
+  type="button"
+  onClick={(e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    triggerGoogleAuth();
+  }}
+  disabled={loading}
+  className={`w-full py-2.5 px-4 rounded-xl border text-xs font-semibold flex items-center justify-center gap-3 transition-all disabled:opacity-50 group ${
+    isLight
+      ? 'border-slate-300 bg-white hover:bg-slate-50 text-slate-700 shadow-xs'
+      : 'border-neutral-700 bg-neutral-950/70 hover:bg-neutral-900 text-neutral-200 shadow-sm hover:border-neutral-600'
+  }`}
+>
+  {googleLoading ? (
+    <RefreshCw className="w-4 h-4 animate-spin text-neutral-400" />
+  ) : (
+    <GoogleIcon className="w-4 h-4" />
+  )}
+  <span>Continue with Google</span>
+</button> 
             {googleError && (
               <div className="mt-2.5 p-2 rounded-lg bg-red-500/10 border border-red-500/30 flex items-center gap-2 text-xs text-red-500 animate-in fade-in">
                 <AlertCircle className="w-4 h-4 shrink-0" />
@@ -432,7 +464,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
               </div>
             </div>
 
-            {/* Password input with show/hide toggle */}
+            {/* Password input */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className={`block text-xs font-medium ${isLight ? 'text-slate-700' : 'text-neutral-300'}`}>
@@ -495,7 +527,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
               </span>
             </div>
 
-            {/* Sign In Button with loading state */}
+            {/* Sign In Button */}
             <button
               type="submit"
               disabled={loading}
@@ -516,7 +548,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
           </form>
 
           {/* 1-Click Demo Login */}
-          <div className={`mt-4 pt-4 border-t ${isLight ? 'border-slate-100' : 'border-neutral-800'}`}>
+          {/* <div className={`mt-4 pt-4 border-t ${isLight ? 'border-slate-100' : 'border-neutral-800'}`}>
             <button
               type="button"
               onClick={handleDemoLogin}
@@ -530,7 +562,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
               <Sparkles className="w-3.5 h-3.5 text-amber-500" />
               <span>Instant Demo Access (Alexander V. Wright)</span>
             </button>
-          </div>
+          </div> */}
 
           {/* Link to Create Account */}
           <div className="mt-5 text-center">

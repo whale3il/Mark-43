@@ -44,6 +44,7 @@ import { BankingService } from './services/bankingService';
 import { realtimeClient } from './services/realtimeClient';
 import { AuthUser } from './types/auth';
 import { CheckCircle2, Menu, X, Headphones, Sun, Moon, LogOut } from 'lucide-react';
+import {supabase} from '../src/lib/supbase'
 
 export default function App() {
   // Navigation & View Mode
@@ -85,6 +86,63 @@ export default function App() {
 
   // Authentication & Session State (pure frontend client state)
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+
+const [authLoading, setAuthLoading] = useState(true);
+const [authError, setAuthError] = useState<string | null>(null);
+
+ useEffect(() => {
+  let active = true;
+  async function restoreSession() {
+    try {
+      const { data, error } = await supabase.auth.getSession();
+      if (error) throw error;
+      if (!data.session) return;
+
+      const { data: verified, error: verifyError } = await supabase.auth.getUser();
+      if (verifyError || !verified.user) throw new Error("Unable to verify your session.");
+      if (!verified.user.email_confirmed_at) throw new Error("Please verify your email before continuing.");
+
+      // Only synchronize Google identities through the Google-specific endpoint.
+      // Password sessions use the existing /api/auth/me endpoint instead.
+      const isGoogle = verified.user.app_metadata?.provider === "google";
+      const token = data.session.access_token;
+      let user: AuthUser;
+      if (isGoogle) {
+        const response = await AuthService.syncGoogleUser(token);
+        if (!response.success || !response.data) {
+          throw new Error(typeof response.error === "string" ? response.error : response.error?.message || "Unable to synchronize your account.");
+        }
+        user = response.data;
+      } else {
+        const response = await fetch("/api/auth/me", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!response.ok) throw new Error("Unable to restore your account profile.");
+        const payload = await response.json();
+        if (!payload.success || !payload.data) throw new Error("Account profile not found.");
+        user = { ...payload.data, name: `${payload.data.firstName} ${payload.data.lastName}` };
+      }
+
+      if (!active) return;
+      localStorage.setItem("whales_token", token);
+      setCurrentUser(user);
+      setActiveTab("dashboard");
+      setIsDesignMode(false);
+      if (window.location.pathname === "/auth/callback") window.history.replaceState({}, "", "/");
+    } catch (err) {
+      console.error("Authentication error:", err);
+      if (active) {
+        localStorage.removeItem("whales_token");
+        setAuthError(err instanceof Error ? err.message : "Authentication failed.");
+      }
+    } finally {
+      if (active) setAuthLoading(false);
+    }
+  }
+  restoreSession();
+  return () => { active = false; };
+}, []);
+
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
 
@@ -395,6 +453,15 @@ export default function App() {
   };
 
   // Render Authentication Flow when not logged in
+  if (authLoading) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-neutral-950 text-neutral-100">
+      <p className="text-neutral-400">
+        Checking authentication session...
+      </p>
+    </div>
+  );
+}
   if (!currentUser) {
     if (authMode === 'signup') {
       return (
@@ -454,7 +521,8 @@ export default function App() {
         supportUnreadCount={supportUnreadCount}
         user={currentUser}
         onLogout={() => {
-          AuthService.logout();
+          void supabase.auth.signOut();
+           void AuthService.logout();
           setCurrentUser(null);
           setAuthMode('login');
           showToast('Session locked. Signed out successfully.');
@@ -484,7 +552,8 @@ export default function App() {
           }}
           supportUnreadCount={supportUnreadCount}
           onLogout={() => {
-            AuthService.logout();
+            void supabase.auth.signOut();
+           void AuthService.logout();
             setCurrentUser(null);
             setAuthMode('login');
             showToast('Session locked. Signed out successfully.');
@@ -569,7 +638,8 @@ export default function App() {
               </button>
               <button
                 onClick={() => {
-                  AuthService.logout();
+                  void supabase.auth.signOut();
+           void AuthService.logout();
                   setCurrentUser(null);
                   setAuthMode('login');
                   setMobileMenuOpen(false);
@@ -711,7 +781,8 @@ export default function App() {
           onClose={() => setShowProfileModal(false)}
           onLogout={() => {
             setShowProfileModal(false);
-            AuthService.logout();
+            void supabase.auth.signOut();
+           void AuthService.logout();
             setCurrentUser(null);
             setAuthMode('login');
             showToast('Session locked. Signed out successfully.');

@@ -1,6 +1,6 @@
 import { CurrencyCode } from './banking';
 
-export type KycTier = 'Tier 1' | 'Tier 2' | 'Tier 3 (BVN & ID Verified)';
+export type KycTier = 'Tier 1 (Email Verified)' | 'Tier 2' | 'Tier 3 (BVN & ID Verified)';
 
 export interface AuthUser {
   id: string;
@@ -15,7 +15,7 @@ export interface AuthUser {
   kycLevel: KycTier;
   hasTransactionPin: boolean;
   pinMasked?: string;
-  primaryAccountNumber: string;
+  primaryAccountNumber: string; 
   accountNumberMasked: string;
   memberSince: string;
   avatarUrl: string;
@@ -37,16 +37,16 @@ export type AuthMode = 'login' | 'signup';
 export type SignUpStep = 'FORM' | 'VERIFICATION' | 'SUCCESS';
 
 export interface UserRegistrationPayload {
+  email: string;
+  password: string;
+  username: string;
   firstName: string;
   lastName: string;
-  username: string;
-  email: string;
-  phone: string;
-  password: string;
+  phone?: string;
 }
 
 export interface LoginPayload {
-  identifier: string; // Email address or Username
+  email: string; // Email address or Username
   password: string;
   rememberMe?: boolean;
 }
@@ -57,7 +57,7 @@ export interface GoogleAuthPayload {
 }
 
 export interface ForgotPasswordPayload {
-  identifier: string;
+  email : string;
 }
 
 export interface VerifyEmailPayload {
@@ -69,25 +69,34 @@ export interface ResendVerificationPayload {
   email: string;
 }
 
+export interface BackendUser {
+  id: string;
+  email: string;
+  username: string;
+  firstName: string;
+  lastName: string;
+  phone?: string | null;
+  clientTier: string;
+  kycLevel: string;
+  emailVerified: boolean;
+}
+
+// types/auth.ts
+
+// src/services/authService.ts (or your auth types file)
+
 export interface AuthApiResponse {
   success: boolean;
-  user?: AuthUser;
-  token?: string;
   message?: string;
-  error?: {
-    code:
-      | 'INVALID_CREDENTIALS'
-      | 'EMAIL_EXISTS'
-      | 'USERNAME_TAKEN'
-      | 'EMAIL_VERIFICATION_REQUIRED'
-      | 'INVALID_VERIFICATION_CODE'
-      | 'GOOGLE_AUTH_FAILED'
-      | 'NETWORK_ERROR'
-      | 'VALIDATION_ERROR'
-      | 'SERVER_ERROR';
-    message: string;
-    field?: 'email' | 'username' | 'password' | 'phone' | 'firstName' | 'lastName' | 'code';
-  };
+  error?: string | AuthApiError;
+  token?: string;
+  data?: any; // Add data property
+  user?: any; // Add user property if you pass user directly
+}
+
+export interface AuthApiError {
+  code?: string;
+  message?: string;
 }
 
 export interface PinSetupPayload {
