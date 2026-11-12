@@ -21,6 +21,9 @@ import { GoogleIcon } from './GoogleIcon';
 import { AuthService } from '../../services/authService';
 import { AuthUser, SignUpStep, UserRegistrationPayload } from '../../types/auth';
 import { USER_PROFILE } from '../../data/mockData';
+// import { GoogleAuthButton } from '../../components/GoogleAuthButton';
+import { supabase } from '../../lib/supbase'
+
 
 interface SignUpViewProps {
   onSuccess: (user: AuthUser) => void;
@@ -48,7 +51,8 @@ export const SignUpView: React.FC<SignUpViewProps> = ({
     password: '',
     confirmPassword: ''
   });
-
+  // Inside SignUpView component
+  const [verifiedUser, setVerifiedUser] = useState<AuthUser | null>(null);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -168,11 +172,10 @@ export const SignUpView: React.FC<SignUpViewProps> = ({
     errors.agreedToTerms = 'You must accept the terms & conditions to open a private vault.';
   }
 
-  // Handle Form Submission -> Transitions FORM to VERIFICATION
+// Handle Form Submission -> Transitions FORM to VERIFICATION
   const handleSubmitForm = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Mark all fields touched
     setTouched({
       firstName: true,
       lastName: true,
@@ -181,12 +184,11 @@ export const SignUpView: React.FC<SignUpViewProps> = ({
       phone: true,
       password: true,
       confirmPassword: true,
-      agreedToTerms: true
+      agreedToTerms: true,
     });
 
     setApiError(null);
 
-    // Validate all fields client-side
     const isFormValid =
       formData.firstName.trim() &&
       formData.lastName.trim() &&
@@ -197,11 +199,8 @@ export const SignUpView: React.FC<SignUpViewProps> = ({
       formData.password === formData.confirmPassword &&
       agreedToTerms;
 
-    if (!isFormValid) {
-      return;
-    }
+    if (!isFormValid || isSubmitting) return;
 
-    if (isSubmitting) return;
     setIsSubmitting(true);
 
     const payload: UserRegistrationPayload = {
@@ -210,38 +209,43 @@ export const SignUpView: React.FC<SignUpViewProps> = ({
       username: formData.username.trim().toLowerCase(),
       email: formData.email.trim().toLowerCase(),
       phone: formData.phone.trim(),
-      password: formData.password
+      password: formData.password,
     };
 
     try {
-      // Connect to API service layer connection point
       const response = await AuthService.register(payload);
 
-      if (!response.success && response.error && response.error.code !== 'NETWORK_ERROR') {
-        setApiError({
-          code: response.error.code,
-          message: response.error.message,
-          field: response.error.field
-        });
+      if (!response.success) {
+        const errorMsg =
+          typeof response.error === 'string'
+            ? response.error
+            : (response.error as any)?.message || 'Registration failed. Please check your inputs.';
+
+        setApiError({ message: errorMsg });
         setIsSubmitting(false);
         return;
       }
     } catch {
-      // Offline fallback: API ready for backend connection
+      // Fallback for network error
+      setApiError({ message: 'Unable to connect to registration servers.' });
+      setIsSubmitting(false);
+      return;
     } finally {
       setIsSubmitting(false);
     }
 
-    // STRICT SEQUENCE: Submitting the signup form ALWAYS enters the 6-digit verification screen
+    // Advance to 6-digit verification screen
     setStep('VERIFICATION');
     setResendCooldown(30);
     setVerificationError(null);
   };
 
-  // 6-Digit Code Input Handlers
+  // 6-Digit Code Input Change Handler
   const handleDigitChange = (index: number, value: string) => {
-    // Only accept numeric digits
+    // Only extract numeric characters
     const cleaned = value.replace(/\D/g, '');
+
+    // Handle backspace or cleared input
     if (!cleaned) {
       const next = [...codeDigits];
       next[index] = '';
@@ -250,7 +254,8 @@ export const SignUpView: React.FC<SignUpViewProps> = ({
     }
 
     const next = [...codeDigits];
-    // If pasted multiple digits
+
+    // Handle pasting multiple digits (e.g. copying 6 digits from email)
     if (cleaned.length > 1) {
       const chars = cleaned.slice(0, 6).split('');
       chars.forEach((c, i) => {
@@ -262,16 +267,18 @@ export const SignUpView: React.FC<SignUpViewProps> = ({
       return;
     }
 
+    // Single digit input
     next[index] = cleaned[cleaned.length - 1];
     setCodeDigits(next);
     setVerificationError(null);
 
-    // Auto-advance to next input
+    // Auto-advance focus to next input box
     if (index < 5) {
       digitInputRefs.current[index + 1]?.focus();
     }
   };
 
+  // Keyboard Navigation Handler (Backspace support)
   const handleDigitKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Backspace' && !codeDigits[index] && index > 0) {
       digitInputRefs.current[index - 1]?.focus();
@@ -279,103 +286,132 @@ export const SignUpView: React.FC<SignUpViewProps> = ({
   };
 
   // Handle Verification Code Submit -> Transitions VERIFICATION to SUCCESS
-  const handleVerifyCodeSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const fullCode = codeDigits.join('');
+ const handleVerifyCodeSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  const fullCode = codeDigits.join('');
 
-    // Client-side validation: must be exactly 6 digits
-    if (fullCode.length !== 6 || !/^\d{6}$/.test(fullCode)) {
-      setVerificationError('Please enter the complete 6-digit verification code.');
+  if (fullCode.length !== 6 || !/^\d{6}$/.test(fullCode)) {
+    setVerificationError('Please enter the complete 6-digit verification code.');
+    return;
+  }
+
+  setVerificationError(null);
+  setIsVerifying(true);
+
+  try {
+    const response = await AuthService.verifyEmail({
+      email: formData.email.trim().toLowerCase(),
+      token: fullCode,
+    });
+
+    if (!response.success) {
+      const errorMsg =
+        typeof response.error === 'string'
+          ? response.error
+          : (response.error as any)?.message || 'Invalid verification token. Please try again.';
+
+      setVerificationError(errorMsg);
+      setIsVerifying(false);
       return;
     }
 
-    setVerificationError(null);
-    setIsVerifying(true);
-
-    try {
-      // Connect to API verification endpoint
-      const response = await AuthService.verifyEmail({
-        email: formData.email,
-        token: fullCode
-      });
-
-      if (!response.success && response.error && response.error.code !== 'NETWORK_ERROR') {
-        setVerificationError(response.error.message || 'Invalid verification token. Please try again.');
-        setIsVerifying(false);
-        return;
-      }
-    } catch {
-      // API connection point
-    } finally {
-      setIsVerifying(false);
+    // Store access token for authenticated session calls
+    if (response.token) {
+      localStorage.setItem('aureus_token', response.token);
     }
 
-    // STRICT SEQUENCE: SUCCESS can only be reached after the verification code is submitted and validated!
+    // Capture the real domain user returned from PostgreSQL/Prisma
+    if (response.user) {
+      setVerifiedUser(response.user);
+    }
+
+    // Progress to success state
     setStep('SUCCESS');
-  };
+  } catch {
+    setVerificationError('Verification failed. Network or server error.');
+  } finally {
+    setIsVerifying(false);
+  }
+};
 
   // Resend 6-Digit Code Handler
   const handleResendCode = async () => {
     if (resendCooldown > 0) return;
-    setResendCooldown(30);
+
+    setResendCooldown(60); // Match backend rate-limit window
     setResendNotice('A new 6-digit verification code has been dispatched to your email.');
     setTimeout(() => setResendNotice(null), 4000);
 
     try {
-      await AuthService.resendVerificationCode(formData.email);
+      const response = await AuthService.resendVerificationCode(formData.email.trim().toLowerCase());
+      if (!response.success) {
+        const errorMsg = typeof response.error === 'string' ? response.error : 'Failed to resend code.';
+        setVerificationError(errorMsg);
+      }
     } catch {
-      // API connection point
+      setVerificationError('Network error while resending verification code.');
     }
   };
 
   // Google Sign-Up Handler
-  const handleGoogleSignUp = async () => {
-    if (googleLoading) return;
-    setGoogleLoading(true);
-    setGoogleError(null);
+  
 
-    try {
-      const response = await AuthService.loginWithGoogle({
-        token: `google-oauth-token-${Date.now()}`
-      });
+const triggerGoogleAuth = async () => {
+  setGoogleLoading(true);
+  setGoogleError(null);
 
-      if (response.success && response.user) {
-        onSuccess(response.user);
-      } else {
-        setGoogleError(response.error?.message || 'Google authorization failed to connect.');
-      }
-    } catch {
-      setGoogleError('Failed to communicate with Google Identity Services. Please use email registration.');
-    } finally {
-      setGoogleLoading(false);
-    }
-  };
+  try {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: window.location.origin,
+        queryParams: {
+          prompt: "select_account",
+        },
+      },
+    });
+
+    if (error) throw error;
+  } catch (error) {
+    setGoogleError(
+      error instanceof Error
+        ? error.message
+        : "Google authentication failed."
+    );
+    setGoogleLoading(false);
+  }
+};
+    
 
   // Construct AuthUser from registered state to transition into dashboard
   const handleLaunchDashboard = () => {
-    const newUser: AuthUser = {
-      id: `usr-${Date.now()}`,
-      firstName: formData.firstName.trim() || 'Alexander',
-      lastName: formData.lastName.trim() || 'Wright',
-      username: formData.username.trim().toLowerCase() || 'sovereign_client',
-      name: `${formData.firstName.trim()} ${formData.lastName.trim()}` || USER_PROFILE.name,
-      email: formData.email.trim() || USER_PROFILE.email,
-      phone: formData.phone.trim() || USER_PROFILE.phone,
-      title: 'Sovereign Private Client',
-      clientTier: 'Aureus Sovereign Private Client',
-      kycLevel: 'Tier 3 (BVN & ID Verified)',
-      hasTransactionPin: true,
-      pinMasked: '••••',
-      primaryAccountNumber: '8940 3120 4821',
-      accountNumberMasked: USER_PROFILE.accountNumberMasked,
-      memberSince: new Date().getFullYear().toString(),
-      avatarUrl: USER_PROFILE.avatarUrl,
-      emailVerified: true,
-      relationshipManager: USER_PROFILE.relationshipManager
-    };
+  const activeUser = verifiedUser;
 
-    onSuccess(newUser);
+  const newUser: AuthUser = {
+    id: activeUser?.id || `usr-${Date.now()}`,
+    firstName: activeUser?.firstName || formData.firstName.trim(),
+    lastName: activeUser?.lastName || formData.lastName.trim(),
+    username: activeUser?.username || formData.username.trim().toLowerCase(),
+    name: activeUser
+      ? `${activeUser.firstName} ${activeUser.lastName}`
+      : `${formData.firstName.trim()} ${formData.lastName.trim()}`,
+    email: activeUser?.email || formData.email.trim().toLowerCase(),
+    phone: activeUser?.phone || formData.phone.trim() || USER_PROFILE.phone,
+    title: 'Sovereign Private Client',
+    clientTier: activeUser?.clientTier || 'STANDARD',
+    kycLevel: activeUser?.kycLevel || 'Tier 1 (Email Verified)',
+    hasTransactionPin: true,
+    pinMasked: '••••',
+    primaryAccountNumber: '8940 3120 4821',
+    accountNumberMasked: USER_PROFILE.accountNumberMasked,
+    memberSince: new Date().getFullYear().toString(),
+    avatarUrl: USER_PROFILE.avatarUrl,
+    emailVerified: activeUser?.emailVerified ?? true,
+    relationshipManager: USER_PROFILE.relationshipManager
   };
+
+  onSuccess(newUser);
+};
 
   const isLight = theme === 'light';
 
@@ -395,12 +431,12 @@ export const SignUpView: React.FC<SignUpViewProps> = ({
                 : 'bg-neutral-900 border-neutral-800 shadow-md text-emerald-400'
             }`}
           >
-            <span className="text-base font-bold tracking-wider font-mono">AV</span>
+            <span className="text-base font-bold tracking-wider font-mono">WV</span>
           </div>
           <div>
             <div className="flex items-center gap-2">
               <span className={`text-base font-bold tracking-tight font-sans ${isLight ? 'text-slate-900' : 'text-neutral-100'}`}>
-                Aureus Wealth
+                WhalesVault
               </span>
               <span
                 className={`text-[10px] font-medium tracking-wider uppercase px-1.5 py-0.5 rounded border font-mono ${
@@ -565,65 +601,65 @@ export const SignUpView: React.FC<SignUpViewProps> = ({
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
                   <span>Sovereign Client Registration</span>
                 </div>
-                <h1 className={`text-2xl sm:text-3xl font-bold tracking-tight font-sans ${isLight ? 'text-slate-900' : 'text-neutral-100'}`}>
-                  Open Private Bank Account
-                </h1>
-                <p className={`text-xs mt-1.5 max-w-md mx-auto ${isLight ? 'text-slate-500' : 'text-neutral-400'}`}>
-                  Create your institutional private banking credentials and provision your portfolio.
-                </p>
-              </div>
+                {/* Title section */}
+<h1 className={`text-2xl sm:text-3xl font-bold tracking-tight font-sans ${isLight ? 'text-slate-900' : 'text-neutral-100'}`}>
+  Open Private Bank Account
+</h1>
+<p className={`text-xs mt-1.5 max-w-md mx-auto ${isLight ? 'text-slate-500' : 'text-neutral-400'}`}>
+  Create your institutional private banking credentials and provision your portfolio.
+</p>
+</div>
 
-              {/* Google Button */}
-              <div className="mb-6">
-                <button
-                  type="button"
-                  onClick={handleGoogleSignUp}
-                  disabled={googleLoading || isSubmitting}
-                  className={`w-full py-2.5 px-4 rounded-xl border text-xs font-semibold flex items-center justify-center gap-3 transition-all disabled:opacity-50 group ${
-                    isLight
-                      ? 'border-slate-300 bg-white hover:bg-slate-50 text-slate-700 shadow-xs'
-                      : 'border-neutral-700 bg-neutral-950/70 hover:bg-neutral-900 text-neutral-200 shadow-sm hover:border-neutral-600'
-                  }`}
-                >
-                  {googleLoading ? (
-                    <RefreshCw className="w-4 h-4 animate-spin text-neutral-400" />
-                  ) : (
-                    <GoogleIcon className="w-4 h-4" />
-                  )}
-                  <span>Continue with Google</span>
-                </button>
+{/* Google Auth Block */}
+<div className="mb-6">
+  <button
+    type="button"
+    onClick={() => triggerGoogleAuth()}
+    disabled={googleLoading || isSubmitting}
+    className={`w-full py-2.5 px-4 rounded-xl border text-xs font-semibold flex items-center justify-center gap-3 transition-all disabled:opacity-50 group ${
+      isLight
+        ? 'border-slate-300 bg-white hover:bg-slate-50 text-slate-700 shadow-xs'
+        : 'border-neutral-700 bg-neutral-950/70 hover:bg-neutral-900 text-neutral-200 shadow-sm hover:border-neutral-600'
+    }`}
+  >
+    {googleLoading ? (
+      <RefreshCw className="w-4 h-4 animate-spin text-neutral-400" />
+    ) : (
+      <GoogleIcon className="w-4 h-4" />
+    )}
+    <span>Continue with Google</span>
+  </button>
 
-                {googleError && (
-                  <div className="mt-2.5 p-2.5 rounded-lg bg-red-500/10 border border-red-500/30 flex items-center gap-2 text-xs text-red-500 animate-in fade-in">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>{googleError}</span>
-                  </div>
-                )}
+  {googleError && (
+    <div className="mt-2.5 p-2.5 rounded-lg bg-red-500/10 border border-red-500/30 flex items-center gap-2 text-xs text-red-500 animate-in fade-in">
+      <AlertCircle className="w-4 h-4 shrink-0" />
+      <span>{googleError}</span>
+    </div>
+  )}
 
-                {/* Aesthetic Divider */}
-                <div className="relative my-6">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className={`w-full border-t ${isLight ? 'border-slate-200' : 'border-neutral-800'}`} />
-                  </div>
-                  <div className="relative flex justify-center text-[10px] font-mono uppercase tracking-widest">
-                    <span className={`px-3 ${isLight ? 'bg-white text-slate-400' : 'bg-neutral-900 text-neutral-500'}`}>
-                      Or Register with Sovereign Credentials
-                    </span>
-                  </div>
-                </div>
-              </div>
+  {/* Aesthetic Divider */}
+  <div className="relative my-6">
+    <div className="absolute inset-0 flex items-center">
+      <div className={`w-full border-t ${isLight ? 'border-slate-200' : 'border-neutral-800'}`} />
+    </div>
+    <div className="relative flex justify-center text-[10px] font-mono uppercase tracking-widest">
+      <span className={`px-3 ${isLight ? 'bg-white text-slate-400' : 'bg-neutral-900 text-neutral-500'}`}>
+        Or Register with Sovereign Credentials
+      </span>
+    </div>
+  </div>
+</div>
 
-              {/* API Error Banner if any */}
-              {apiError && (
-                <div className="mb-5 p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 flex items-start gap-2.5 text-xs text-red-600 dark:text-red-300 animate-in fade-in">
-                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-semibold block text-red-700 dark:text-red-200">Registration Notice</span>
-                    <span className="text-[11px] text-red-600/90 dark:text-red-300/90">{apiError.message}</span>
-                  </div>
-                </div>
-              )}
-
+{/* API Error Banner */}
+{apiError && (
+  <div className="mb-5 p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 flex items-start gap-2.5 text-xs text-red-600 dark:text-red-300 animate-in fade-in">
+    <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+    <div>
+      <span className="font-semibold block text-red-700 dark:text-red-200">Registration Notice</span>
+      <span className="text-[11px] text-red-600/90 dark:text-red-300/90">{apiError.message}</span>
+    </div>
+  </div>
+)}
               {/* Registration Form */}
               <form onSubmit={handleSubmitForm} noValidate className="space-y-4">
                 {/* 1 & 2: First Name and Last Name */}
@@ -1158,7 +1194,7 @@ export const SignUpView: React.FC<SignUpViewProps> = ({
                 <div className="flex items-center justify-between">
                   <span className={`uppercase text-[10px] ${isLight ? 'text-slate-400' : 'text-neutral-500'}`}>Regulatory Status</span>
                   <span className={`flex items-center gap-1 text-[11px] ${isLight ? 'text-slate-600' : 'text-neutral-300'}`}>
-                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" /> Tier 3 Private Operational
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" /> Tier 1 email Verified
                   </span>
                 </div>
               </div>
@@ -1182,17 +1218,18 @@ export const SignUpView: React.FC<SignUpViewProps> = ({
         <div className={`mt-6 text-center space-y-1 text-[11px] ${isLight ? 'text-slate-500' : 'text-neutral-500'}`}>
           <p className="flex items-center justify-center gap-1.5">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-            256-bit TLS Military Encryption · CBN Licensed · NDIC Insured Clearing
+            Secure Authentication · Encrypted Connections · Privacy Focused
           </p>
+
           <p className={`text-[10px] font-mono ${isLight ? 'text-slate-400' : 'text-neutral-600'}`}>
-            POST /api/auth/register → POST /api/auth/verify-email
+            Powered by Supabase Auth · Secure Session Management
           </p>
         </div>
       </main>
 
       {/* Footer */}
       <footer className={`max-w-5xl w-full mx-auto text-center text-[11px] ${isLight ? 'text-slate-400' : 'text-neutral-600'}`}>
-        © {new Date().getFullYear()} Aureus Wealth Private Bank. Central Bank of Nigeria Regulatory Standard NUBAN Integration.
+        © {new Date().getFullYear()}  whalesVault Private Bank. Central Bank of Nigeria Regulatory Standard NUBAN Integration.
       </footer>
     </div>
   );
