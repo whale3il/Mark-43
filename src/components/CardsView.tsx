@@ -234,7 +234,7 @@ export const CardsView: React.FC<CardsViewProps> = ({
                     </div>
                   </div>
                   <div className="text-[9px] text-neutral-500 leading-tight">
-                    Issued by Aureus Private Banking pursuant to license by Visa International. 24/7 Concierge Hotline: +1 (212) 555-0199.
+                    Issued by whalesVault Digital Banking pursuant to license by Visa International. 24/7 Concierge Hotline: +1 (212) 555-0199.
                   </div>
                 </div>
 
