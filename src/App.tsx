@@ -685,7 +685,9 @@ const [authError, setAuthError] = useState<string | null>(null);
     (portalMode === 'CLIENT' && activeTab === 'support' && !isDesignMode);
 
   return (
+<!-- <<<<<<< nexus -->
     
+
 <div className={`h-dvh flex flex-col overflow-hidden ${theme === 'light' ? 'bg-slate-50 text-slate-900' : 'bg-neutral-950 text-neutral-100'} font-sans antialiased selection:bg-emerald-500/20 selection:text-emerald-300 transition-colors duration-200`}>
   {/* Hide Header inside Support workspaces for full viewport height */}
   {!isSupportWorkspace && (
@@ -725,6 +727,7 @@ const [authError, setAuthError] = useState<string | null>(null);
     />
   )}
 
+<!-- >>>>>>> safe-checkpoint -->
 
       {/* Global Toast Notification */}
       {toastMessage && (
