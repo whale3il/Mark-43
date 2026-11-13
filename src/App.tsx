@@ -10,7 +10,13 @@ import {
   INITIAL_NOTIFICATIONS,
   INITIAL_STATEMENTS,
   INITIAL_SESSIONS,
-  USER_PROFILE
+  USER_PROFILE,
+  SUPPORT_STAFF_LIST,
+  SUPPORT_CUSTOMERS,
+  INITIAL_SUPPORT_CONVERSATIONS,
+  INITIAL_CANNED_RESPONSES,
+  INITIAL_SUPPORT_ANALYTICS,
+  INITIAL_TICKETS
 } from './data/mockData';
 import {
   BankAccount,
@@ -21,6 +27,17 @@ import {
   SavingsGoal,
   CurrencyCode
 } from './types/banking';
+import {
+  SupportAgent,
+  SupportMessage,
+  SupportConversation,
+  SupportTicket,
+  CannedResponse,
+  SupportAnalytics,
+  UserPortalRole,
+  StaffAvailability,
+  TicketStatus
+} from './types/support';
 import { Header } from './components/Header';
 import { Sidebar, NavTab } from './components/Sidebar';
 import { DashboardView } from './components/DashboardView';
@@ -33,6 +50,8 @@ import { BillsView } from './components/BillsView';
 import { StatementsView } from './components/StatementsView';
 import { SecurityView } from './components/SecurityView';
 import { SupportView } from './components/SupportView';
+import { StaffWorkspaceView } from './components/support/StaffWorkspaceView';
+import { SuperAdminSupportView } from './components/support/SuperAdminSupportView';
 import { DesignSpecView } from './components/DesignSpecView';
 import { TransactionReceiptModal } from './components/TransactionReceiptModal';
 import { OpenVaultModal } from './components/OpenVaultModal';
@@ -41,6 +60,7 @@ import { SignUpView } from './components/auth/SignUpView';
 import { UserProfileModal } from './components/UserProfileModal';
 import { AuthService } from './services/authService';
 import { BankingService } from './services/bankingService';
+import { SupportService } from './services/supportService';
 import { realtimeClient } from './services/realtimeClient';
 import { AuthUser } from './types/auth';
 import { CheckCircle2, Menu, X, Headphones, Sun, Moon, LogOut } from 'lucide-react';
@@ -81,8 +101,26 @@ export default function App() {
     showToast(`Switched to ${next === 'light' ? 'Executive Slate Light' : 'Obsidian Dark'} theme`);
   };
 
+  // Portal Mode State ('CLIENT' | 'STAFF' | 'ADMIN') synchronized with URL pathname
+  const [portalMode, setPortalMode] = useState<UserPortalRole>(() => {
+    if (typeof window !== 'undefined') {
+      const path = window.location.pathname.toLowerCase();
+      if (path === '/staff' || path.startsWith('/staff/')) return 'STAFF';
+      if (path === '/admin' || path.startsWith('/admin/')) return 'ADMIN';
+    }
+    return 'CLIENT';
+  });
+
   // Dedicated Support Unread Counter State
   const [supportUnreadCount, setSupportUnreadCount] = useState<number>(2);
+
+  // Support System State (ready for Express, Supabase & Ably backend)
+  const [staffList, setStaffList] = useState<SupportAgent[]>(SUPPORT_STAFF_LIST);
+  const [supportConversations, setSupportConversations] = useState<SupportConversation[]>(INITIAL_SUPPORT_CONVERSATIONS);
+  const [supportTickets, setSupportTickets] = useState<SupportTicket[]>(INITIAL_TICKETS);
+  const [supportCustomers, setSupportCustomers] = useState(SUPPORT_CUSTOMERS);
+  const [cannedResponses, setCannedResponses] = useState<CannedResponse[]>(INITIAL_CANNED_RESPONSES);
+  const [supportAnalytics, setSupportAnalytics] = useState<SupportAnalytics>(INITIAL_SUPPORT_ANALYTICS);
 
   // Authentication & Session State (pure frontend client state)
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
@@ -168,19 +206,58 @@ const [authError, setAuthError] = useState<string | null>(null);
     setTimeout(() => setToastMessage(null), 3500);
   };
 
+  // Synchronize browser history and URL with portal changes
+  useEffect(() => {
+    const handlePopState = () => {
+      const path = window.location.pathname.toLowerCase();
+      if (path === '/staff' || path.startsWith('/staff/')) {
+        setPortalMode('STAFF');
+      } else if (path === '/admin' || path.startsWith('/admin/')) {
+        setPortalMode('ADMIN');
+      } else {
+        setPortalMode('CLIENT');
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  const handleSetPortalMode = (mode: UserPortalRole) => {
+    setPortalMode(mode);
+    if (typeof window !== 'undefined') {
+      const targetPath = mode === 'STAFF' ? '/staff' : mode === 'ADMIN' ? '/admin' : '/';
+      if (window.location.pathname !== targetPath) {
+        window.history.pushState(null, '', targetPath);
+      }
+    }
+  };
+
   // Fetch initial data from server-side Prisma & Supabase backend and subscribe to realtime events
   useEffect(() => {
     const fetchServerData = async () => {
       try {
-        const res = await BankingService.getDashboard();
-        if (res.success && res.data) {
-          if (res.data.accounts) setAccounts(res.data.accounts);
-          if (res.data.transactions) setTransactions(res.data.transactions);
-          if (res.data.beneficiaries) setBeneficiaries(res.data.beneficiaries);
-          if (res.data.cards) setCards(res.data.cards);
-          if (res.data.bills) setBills(res.data.bills);
-          if (res.data.goals) setGoals(res.data.goals);
-          if (res.data.sessions) setSessions(res.data.sessions);
+        const [bankRes, supportRes] = await Promise.all([
+          BankingService.getDashboard(),
+          SupportService.getDashboard()
+        ]);
+
+        if (bankRes.success && bankRes.data) {
+          if (bankRes.data.accounts) setAccounts(bankRes.data.accounts);
+          if (bankRes.data.transactions) setTransactions(bankRes.data.transactions);
+          if (bankRes.data.beneficiaries) setBeneficiaries(bankRes.data.beneficiaries);
+          if (bankRes.data.cards) setCards(bankRes.data.cards);
+          if (bankRes.data.bills) setBills(bankRes.data.bills);
+          if (bankRes.data.goals) setGoals(bankRes.data.goals);
+          if (bankRes.data.sessions) setSessions(bankRes.data.sessions);
+        }
+
+        if (supportRes.success && supportRes.data) {
+          if (supportRes.data.staffList) setStaffList(supportRes.data.staffList);
+          if (supportRes.data.conversations) setSupportConversations(supportRes.data.conversations);
+          if (supportRes.data.tickets) setSupportTickets(supportRes.data.tickets);
+          if (supportRes.data.customers) setSupportCustomers(supportRes.data.customers);
+          if (supportRes.data.cannedResponses) setCannedResponses(supportRes.data.cannedResponses);
+          if (supportRes.data.analytics) setSupportAnalytics(supportRes.data.analytics);
         }
       } catch (err) {
         console.error('Initial dashboard sync error:', err);
@@ -452,6 +529,112 @@ const [authError, setAuthError] = useState<string | null>(null);
     }
   };
 
+  // Support Workspace Handlers (decoupled via SupportService for Express/PostgreSQL/Supabase & Ably)
+  const handleUpdateStaffAvailability = async (staffId: string, status: StaffAvailability) => {
+    setStaffList((prev) =>
+      prev.map((s) => (s.id === staffId ? { ...s, availability: status, status, online: status !== 'offline' } : s))
+    );
+    setSupportConversations((prev) =>
+      prev.map((c) =>
+        c.agent.id === staffId
+          ? { ...c, agent: { ...c.agent, availability: status, status, online: status !== 'offline' } }
+          : c
+      )
+    );
+    await SupportService.updateStaffAvailability(staffId, status);
+    showToast(`Staff desk status updated to ${status}.`);
+  };
+
+  const handleUpdateSupportConversation = async (updatedConv: SupportConversation) => {
+    setSupportConversations((prev) => prev.map((c) => (c.id === updatedConv.id ? updatedConv : c)));
+    await SupportService.updateConversation(updatedConv.id, {
+      status: updatedConv.status,
+      internalNotes: updatedConv.internalNotes,
+      unreadCount: updatedConv.unreadCount
+    });
+  };
+
+  const handleTransferConversation = async (conversationId: string, targetStaffId: string, note?: string) => {
+    const targetStaff = staffList.find((s) => s.id === targetStaffId);
+    if (!targetStaff) return;
+
+    setSupportConversations((prev) =>
+      prev.map((c) => {
+        if (c.id !== conversationId) return c;
+        const updatedNotes = note
+          ? Array.isArray(c.internalNotes)
+            ? [...c.internalNotes, `[Transfer note]: ${note}`]
+            : c.internalNotes
+            ? `${c.internalNotes} | [Transfer note]: ${note}`
+            : `[Transfer note]: ${note}`
+          : c.internalNotes;
+
+        const transferMsg: SupportMessage = {
+          id: `msg-trans-${Date.now()}`,
+          conversationId: c.id,
+          sender: 'system',
+          text: `Conversation transferred to ${targetStaff.name} (${targetStaff.department}).`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          status: 'delivered'
+        };
+        return {
+          ...c,
+          agent: targetStaff,
+          internalNotes: updatedNotes,
+          messages: [...c.messages, transferMsg],
+          lastMessage: transferMsg.text
+        };
+      })
+    );
+
+    setStaffList((prev) =>
+      prev.map((s) => (s.id === targetStaffId ? { ...s, activeConversationsCount: (s.activeConversationsCount || 0) + 1 } : s))
+    );
+
+    await SupportService.transferConversation(conversationId, targetStaffId, note);
+    showToast(`Ticket & conversation successfully routed to ${targetStaff.name}.`);
+  };
+
+  const handleCreateTicket = async (ticket: SupportTicket) => {
+    setSupportTickets((prev) => [ticket, ...prev]);
+    await SupportService.createTicket({
+      subject: ticket.subject,
+      category: ticket.category,
+      priority: ticket.priority,
+      description: ticket.description,
+      assignedAgent: ticket.assignedAgent,
+      assignedAgentId: ticket.assignedAgentId,
+      customerId: ticket.customerId,
+      customerName: ticket.customerName
+    });
+    showToast(`Support ticket ${ticket.id} logged with desk.`);
+  };
+
+  const handleUpdateTicketStatus = async (ticketId: string, status: TicketStatus) => {
+    const nowStr = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    setSupportTickets((prev) =>
+      prev.map((t) => (t.id === ticketId ? { ...t, status, updatedAt: nowStr } : t))
+    );
+    await SupportService.updateTicketStatus(ticketId, status);
+    showToast(`Ticket ${ticketId} marked as ${status}.`);
+  };
+
+  const handleAddCannedResponse = async (newTemplate: Omit<CannedResponse, 'id'>) => {
+    const res = await SupportService.addCannedResponse(newTemplate);
+    const template: CannedResponse = res.data || {
+      ...newTemplate,
+      id: `canned-${Date.now()}`
+    };
+    setCannedResponses((prev) => [...prev, template]);
+    showToast(`Canned template "${template.shortcut}" created.`);
+  };
+
+  const handleDeleteCannedResponse = async (templateId: string) => {
+    setCannedResponses((prev) => prev.filter((t) => t.id !== templateId));
+    await SupportService.deleteCannedResponse(templateId);
+    showToast('Template deleted.');
+  };
+
   // Render Authentication Flow when not logged in
   if (authLoading) {
   return (
@@ -496,39 +679,55 @@ const [authError, setAuthError] = useState<string | null>(null);
     );
   }
 
+  const isSupportWorkspace =
+    portalMode === 'STAFF' ||
+    portalMode === 'ADMIN' ||
+    (portalMode === 'CLIENT' && activeTab === 'support' && !isDesignMode);
+
   return (
-    <div className={`h-screen flex flex-col overflow-hidden ${theme === 'light' ? 'bg-slate-50 text-slate-900' : 'bg-neutral-950 text-neutral-100'} font-sans antialiased selection:bg-emerald-500/20 selection:text-emerald-300 transition-colors duration-200`}>
-      {/* Top Bar Contract with Theme Switcher, Main Support Navigation & User Session */}
-      <Header
-        maskBalance={maskBalance}
-        setMaskBalance={setMaskBalance}
-        isDesignMode={isDesignMode}
-        setIsDesignMode={setIsDesignMode}
-        currency={currency}
-        setCurrency={setCurrency}
-        notifications={notifications}
-        setNotifications={setNotifications}
-        onOpenTransfer={() => {
-          setActiveTab('transfers');
-          if (isDesignMode) setIsDesignMode(false);
-        }}
-        theme={theme}
-        toggleTheme={toggleTheme}
-        onNavigateSupport={() => {
-          setActiveTab('support');
-          if (isDesignMode) setIsDesignMode(false);
-        }}
-        supportUnreadCount={supportUnreadCount}
-        user={currentUser}
-        onLogout={() => {
-          void supabase.auth.signOut();
-           void AuthService.logout();
-          setCurrentUser(null);
-          setAuthMode('login');
-          showToast('Session locked. Signed out successfully.');
-        }}
-        onOpenProfile={() => setShowProfileModal(true)}
-      />
+<!-- <<<<<<< nexus -->
+    
+
+<div className={`h-dvh flex flex-col overflow-hidden ${theme === 'light' ? 'bg-slate-50 text-slate-900' : 'bg-neutral-950 text-neutral-100'} font-sans antialiased selection:bg-emerald-500/20 selection:text-emerald-300 transition-colors duration-200`}>
+  {/* Hide Header inside Support workspaces for full viewport height */}
+  {!isSupportWorkspace && (
+    <Header
+      portalMode={portalMode}
+      setPortalMode={handleSetPortalMode}
+      maskBalance={maskBalance}
+      setMaskBalance={setMaskBalance}
+      isDesignMode={isDesignMode}
+      setIsDesignMode={setIsDesignMode}
+      currency={currency}
+      setCurrency={setCurrency}
+      notifications={notifications}
+      setNotifications={setNotifications}
+      onOpenTransfer={() => {
+        handleSetPortalMode('CLIENT');
+        setActiveTab('transfers');
+        if (isDesignMode) setIsDesignMode(false);
+      }}
+      theme={theme}
+      toggleTheme={toggleTheme}
+      onNavigateSupport={() => {
+        handleSetPortalMode('CLIENT');
+        setActiveTab('support');
+        if (isDesignMode) setIsDesignMode(false);
+      }}
+      supportUnreadCount={supportUnreadCount}
+      user={currentUser}
+      onLogout={() => {
+        void supabase.auth.signOut();
+        void AuthService.logout();
+        setCurrentUser(null);
+        setAuthMode('login');
+        showToast('Session locked. Signed out successfully.');
+      }}
+      onOpenProfile={() => setShowProfileModal(true)}
+    />
+  )}
+
+<!-- >>>>>>> safe-checkpoint -->
 
       {/* Global Toast Notification */}
       {toastMessage && (
@@ -538,15 +737,17 @@ const [authError, setAuthError] = useState<string | null>(null);
         </div>
       )}
 
-      {/* Main Workspace Frame */}
+      {/* Main Workspace Frame — Original Main Sidebar persists across Client, Staff, and Admin portals */}
       <div className="flex-1 flex w-full min-h-0 overflow-hidden">
-        {/* Sidebar Navigation */}
         <Sidebar
+          portalMode={portalMode}
+          onSelectPortal={handleSetPortalMode}
           activeTab={activeTab}
           setActiveTab={setActiveTab}
           isDesignMode={isDesignMode}
           setIsDesignMode={setIsDesignMode}
           onOpenAdvisorModal={() => {
+            handleSetPortalMode('CLIENT');
             setActiveTab('support');
             if (isDesignMode) setIsDesignMode(false);
           }}
@@ -561,15 +762,29 @@ const [authError, setAuthError] = useState<string | null>(null);
           theme={theme}
         />
 
-        {/* Viewport Content Area */}
-        <main className="flex-1 p-4 md:p-8 overflow-y-auto max-w-full h-full">
-          {/* Mobile Tab Nav Selector */}
-          <div className="md:hidden mb-4 flex items-center justify-between pb-3 border-b border-neutral-800">
+        {/* Viewport Content Area — Dedicated full-height flexible shell for Support (User, Staff, Admin); unchanged everywhere else */}
+        <main
+          className={`flex-1 min-w-0 min-h-0 h-full max-w-full ${
+            isSupportWorkspace
+              ? 'p-1.5 sm:p-3 overflow-hidden flex flex-col'
+              : 'p-4 md:p-8 overflow-y-auto'
+          }`}
+        >
+          {/* Mobile Tab & Portal Nav Selector */}
+          <div className={`md:hidden ${isSupportWorkspace ? 'mb-1.5 pb-1.5' : 'mb-2.5 pb-2'} flex items-center justify-between border-b shrink-0 ${theme === 'light' ? 'border-slate-200' : 'border-neutral-800'}`}>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-neutral-300 capitalize">
-                {isDesignMode ? 'Design System Specs' : activeTab === 'support' ? 'Customer Support' : activeTab}
+              <span className={`text-xs font-semibold capitalize ${theme === 'light' ? 'text-slate-800' : 'text-neutral-300'}`}>
+                {portalMode === 'STAFF'
+                  ? 'Staff Desk'
+                  : portalMode === 'ADMIN'
+                  ? 'Super Admin'
+                  : isDesignMode
+                  ? 'Design System Specs'
+                  : activeTab === 'support'
+                  ? 'Customer Support'
+                  : activeTab}
               </span>
-              {activeTab === 'support' && supportUnreadCount > 0 && (
+              {portalMode === 'CLIENT' && activeTab === 'support' && supportUnreadCount > 0 && (
                 <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-emerald-500 text-neutral-950 font-bold">
                   {supportUnreadCount} unread
                 </span>
@@ -579,7 +794,7 @@ const [authError, setAuthError] = useState<string | null>(null);
             <div className="flex items-center gap-2">
               <button
                 onClick={toggleTheme}
-                className="p-1.5 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-400"
+                className={`p-1.5 rounded-lg border ${theme === 'light' ? 'bg-white border-slate-200 text-slate-600' : 'bg-neutral-900 border-neutral-800 text-neutral-400'}`}
                 title="Toggle Theme"
               >
                 {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-sky-500" />}
@@ -587,7 +802,7 @@ const [authError, setAuthError] = useState<string | null>(null);
 
               <button
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                className="p-1.5 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-400"
+                className={`p-1.5 rounded-lg border ${theme === 'light' ? 'bg-white border-slate-200 text-slate-600' : 'bg-neutral-900 border-neutral-800 text-neutral-400'}`}
               >
                 {mobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
               </button>
@@ -595,7 +810,7 @@ const [authError, setAuthError] = useState<string | null>(null);
           </div>
 
           {mobileMenuOpen && (
-            <div className="md:hidden mb-6 p-3 rounded-xl bg-neutral-900 border border-neutral-800 grid grid-cols-2 gap-2 text-xs">
+            <div className={`md:hidden ${isSupportWorkspace ? 'mb-2' : 'mb-6'} p-3 rounded-xl border grid grid-cols-2 gap-2 text-xs shrink-0 max-h-[65dvh] overflow-y-auto ${theme === 'light' ? 'bg-white border-slate-200' : 'bg-neutral-900 border-neutral-800'}`}>
               {[
                 { id: 'dashboard', label: 'Dashboard' },
                 { id: 'accounts', label: 'Accounts' },
@@ -611,14 +826,17 @@ const [authError, setAuthError] = useState<string | null>(null);
                 <button
                   key={tab.id}
                   onClick={() => {
+                    handleSetPortalMode('CLIENT');
                     setActiveTab(tab.id as NavTab);
                     setIsDesignMode(false);
                     setMobileMenuOpen(false);
                   }}
                   className={`p-2 rounded-lg text-left transition-colors flex items-center justify-between ${
-                    activeTab === tab.id && !isDesignMode
+                    portalMode === 'CLIENT' && activeTab === tab.id && !isDesignMode
                       ? 'bg-emerald-500/10 text-emerald-400 font-semibold'
-                      : 'text-neutral-400'
+                      : theme === 'light'
+                      ? 'text-slate-600 hover:bg-slate-100'
+                      : 'text-neutral-400 hover:bg-neutral-800/50'
                   }`}
                 >
                   <span>{tab.label}</span>
@@ -629,6 +847,39 @@ const [authError, setAuthError] = useState<string | null>(null);
               ))}
               <button
                 onClick={() => {
+                  handleSetPortalMode('STAFF');
+                  setIsDesignMode(false);
+                  setMobileMenuOpen(false);
+                }}
+                className={`p-2 rounded-lg text-left transition-colors font-medium ${
+                  portalMode === 'STAFF'
+                    ? 'bg-sky-500/15 text-sky-400 font-semibold border border-sky-500/30'
+                    : theme === 'light'
+                    ? 'text-slate-700 bg-slate-100'
+                    : 'text-neutral-300 bg-neutral-800/60'
+                }`}
+              >
+                Staff Desk (/staff)
+              </button>
+              <button
+                onClick={() => {
+                  handleSetPortalMode('ADMIN');
+                  setIsDesignMode(false);
+                  setMobileMenuOpen(false);
+                }}
+                className={`p-2 rounded-lg text-left transition-colors font-medium ${
+                  portalMode === 'ADMIN'
+                    ? 'bg-purple-500/15 text-purple-400 font-semibold border border-purple-500/30'
+                    : theme === 'light'
+                    ? 'text-slate-700 bg-slate-100'
+                    : 'text-neutral-300 bg-neutral-800/60'
+                }`}
+              >
+                Super Admin (/admin)
+              </button>
+              <button
+                onClick={() => {
+                  handleSetPortalMode('CLIENT');
                   setIsDesignMode(true);
                   setMobileMenuOpen(false);
                 }}
@@ -653,8 +904,38 @@ const [authError, setAuthError] = useState<string | null>(null);
             </div>
           )}
 
-          {/* Conditional View Rendering */}
-          {isDesignMode ? (
+          {/* Conditional Portal & View Rendering */}
+          {portalMode === 'STAFF' ? (
+            <div className="flex-1 min-h-0 flex flex-col">
+              <StaffWorkspaceView
+                staffList={staffList}
+                conversations={supportConversations}
+                tickets={supportTickets}
+                customers={supportCustomers}
+                cannedResponses={cannedResponses}
+                onUpdateConversation={handleUpdateSupportConversation}
+                onUpdateStaffAvailability={handleUpdateStaffAvailability}
+                onUpdateTicketStatus={handleUpdateTicketStatus}
+                onTransferConversation={handleTransferConversation}
+                theme={theme}
+              />
+            </div>
+          ) : portalMode === 'ADMIN' ? (
+            <div className="flex-1 min-h-0 flex flex-col">
+              <SuperAdminSupportView
+                staffList={staffList}
+                conversations={supportConversations}
+                tickets={supportTickets}
+                cannedResponses={cannedResponses}
+                analytics={supportAnalytics}
+                onUpdateStaffAvailability={handleUpdateStaffAvailability}
+                onReassignConversation={handleTransferConversation}
+                onAddCannedResponse={handleAddCannedResponse}
+                onDeleteCannedResponse={handleDeleteCannedResponse}
+                theme={theme}
+              />
+            </div>
+          ) : isDesignMode ? (
             <DesignSpecView onReturnToApp={() => setIsDesignMode(false)} />
           ) : (
             <>
@@ -748,9 +1029,23 @@ const [authError, setAuthError] = useState<string | null>(null);
               )}
 
               {activeTab === 'support' && (
-                <SupportView
-                  onUnreadChange={(count) => setSupportUnreadCount(count)}
-                />
+                <div className="flex-1 min-h-0 flex flex-col">
+                  <SupportView
+                    staffList={staffList}
+                    conversations={supportConversations}
+                    tickets={supportTickets}
+                    currentCustomer={{
+                      id: currentUser.id === 'usr-demo-alexander' ? USER_PROFILE.id : currentUser.id,
+                      name: currentUser.name,
+                      clientTier: currentUser.clientTier || USER_PROFILE.clientTier,
+                      avatarUrl: currentUser.avatarUrl
+                    }}
+                    onUnreadChange={(count) => setSupportUnreadCount(count)}
+                    onUpdateConversations={(convs) => setSupportConversations(convs)}
+                    onCreateTicket={handleCreateTicket}
+                    theme={theme}
+                  />
+                </div>
               )}
             </>
           )}
