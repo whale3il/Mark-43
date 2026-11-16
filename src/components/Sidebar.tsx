@@ -191,7 +191,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Dedicated Support Workspaces */}
-        <div className={`pt-2 border-t ${isLight ? 'border-slate-200/80' : 'border-neutral-800/70'}`}>
+        {/* <div className={`pt-2 border-t ${isLight ? 'border-slate-200/80' : 'border-neutral-800/70'}`}>
           {isExpanded && (
             <div
               className={`px-3 pb-2 text-[11px] font-mono uppercase tracking-wider whitespace-nowrap ${
@@ -277,7 +277,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               )}
             </button>
           </div>
-        </div>
+        </div> */}
 
         {/* Design System Spec Link */}
         <div className={`pt-2 border-t ${isLight ? 'border-slate-200/80' : 'border-neutral-800/70'}`}>

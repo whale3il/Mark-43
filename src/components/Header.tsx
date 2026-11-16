@@ -147,7 +147,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className={`hidden sm:flex items-center p-0.5 rounded-lg border text-xs ${
             isLight ? 'bg-slate-100 border-slate-200' : 'bg-neutral-900/90 border-neutral-800'
           }`}>
-            <button
+            {/* <button
               onClick={() => setPortalMode('CLIENT')}
               className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
                 portalMode === 'CLIENT'
@@ -156,8 +156,8 @@ export const Header: React.FC<HeaderProps> = ({
               }`}
             >
               Client
-            </button>
-            <button
+            </button> */}
+            {/* <button
               onClick={() => setPortalMode('STAFF')}
               className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
                 portalMode === 'STAFF'
@@ -167,8 +167,8 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <Headphones className="w-3 h-3 text-emerald-400" />
               <span>Staff (/staff)</span>
-            </button>
-            <button
+            </button> */}
+            {/* <button
               onClick={() => setPortalMode('ADMIN')}
               className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
                 portalMode === 'ADMIN'
@@ -177,7 +177,7 @@ export const Header: React.FC<HeaderProps> = ({
               }`}
             >
               <span>Admin (/admin)</span>
-            </button>
+            </button> */}
           </div>
         )}
 
