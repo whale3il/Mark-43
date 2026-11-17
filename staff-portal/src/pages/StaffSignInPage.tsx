@@ -12,6 +12,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { useStaffAuth } from '../context/StaffAuthContext';
+import { STAFF_CONFIG } from '../config/staffConfig';
 
 interface StaffSignInPageProps {
   onGoToInvite?: () => void;
@@ -20,12 +21,15 @@ interface StaffSignInPageProps {
 export const StaffSignInPage: React.FC<StaffSignInPageProps> = () => {
   const {
     signIn,
+    backendAuthUnavailable,
+    enterDevPreviewMode,
     sessionExpiredMessage,
     clearSessionExpiredMessage,
     theme,
     toggleTheme,
   } = useStaffAuth();
   const isLight = theme === 'light';
+  const isDevMode = typeof import.meta !== 'undefined' && Boolean(import.meta.env?.DEV);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -248,9 +252,38 @@ export const StaffSignInPage: React.FC<StaffSignInPageProps> = () => {
               registration is disabled.
             </div>
             <div className="font-mono text-[10px]">
-              Auth endpoint: POST /api/staff/auth/signin
+              Auth endpoint: POST {STAFF_CONFIG.apiBaseUrl}
+              {STAFF_CONFIG.endpoints.auth.signIn}
             </div>
           </div>
+
+          {isDevMode && backendAuthUnavailable && (
+            <div
+              className={`p-3.5 rounded-xl border space-y-2.5 ${
+                isLight
+                  ? 'border-amber-200 bg-amber-50 text-amber-900'
+                  : 'border-amber-500/35 bg-amber-500/10 text-amber-200'
+              }`}
+            >
+              <div className="space-y-0.5 text-xs">
+                <div className="font-semibold">
+                  Development Preview Mode Available
+                </div>
+                <p className="text-[11px] opacity-90 leading-relaxed">
+                  Express backend is currently unreachable. You can preview the
+                  workspace UI using read-only mock records without creating a
+                  real authenticated session.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={enterDevPreviewMode}
+                className="w-full py-2 px-3 rounded-lg bg-amber-500 hover:bg-amber-400 text-neutral-950 font-semibold text-xs cursor-pointer transition-colors"
+              >
+                Open Dev Preview Mode (Not Authenticated)
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

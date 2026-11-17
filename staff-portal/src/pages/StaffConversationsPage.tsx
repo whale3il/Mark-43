@@ -39,6 +39,10 @@ import { CannedResponsesMenu } from '@/src/components/support/CannedResponsesMen
 import { StaffInboxPanel } from '../components/StaffInboxPanel';
 import { StaffCustomerDetailsPanel } from '../components/StaffCustomerDetailsPanel';
 import { StaffAiTabWorkspace } from '../components/StaffAiTabWorkspace';
+import {
+  useResizablePaneWidth,
+  ResizableSplitDivider,
+} from '@/src/components/support/ResizableMessagingSplit';
 
 interface StaffConversationsPageProps {
   staff: StaffMemberProfile;
@@ -137,6 +141,22 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const splitContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const {
+    width: inboxWidth,
+    isDragging: isResizingInbox,
+    handlePointerDown: handleInboxSplitPointerDown,
+    handleKeyDown: handleInboxSplitKeyDown,
+    handleResetWidth: handleInboxSplitReset,
+  } = useResizablePaneWidth({
+    storageKey: 'aureus_staff_inbox_width',
+    defaultWidth: 310,
+    minWidth: 240,
+    maxWidth: 500,
+    minRemainingWidth: detailsOpen ? 620 : 360,
+    containerRef: splitContainerRef,
+  });
 
   const activeConv =
     conversations.find((c) => c.id === selectedConversationId) ||
@@ -535,11 +555,11 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
     : [];
 
   return (
-    <div className="flex-1 min-h-0 flex overflow-hidden">
+    <div ref={splitContainerRef} className="flex-1 min-h-0 flex overflow-hidden">
       {/* LEFT PANEL: Inbox (Desktop always/collapsible; Mobile full-screen when mobileView==='inbox') */}
       <div
         className={`${
-          mobileView === 'inbox' ? 'flex w-full' : 'hidden'
+          mobileView === 'inbox' ? 'flex w-full md:w-auto' : 'hidden'
         } md:flex h-full min-h-0 shrink-0`}
       >
         <StaffInboxPanel
@@ -554,8 +574,25 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
           onToggleCollapse={() => setInboxCollapsed((prev) => !prev)}
           isLoading={isLoadingData}
           theme={theme}
+          widthPx={inboxWidth}
+          isResizing={isResizingInbox}
         />
       </div>
+
+      {!inboxCollapsed && (
+        <ResizableSplitDivider
+          isDragging={isResizingInbox}
+          onPointerDown={handleInboxSplitPointerDown}
+          onKeyDown={handleInboxSplitKeyDown}
+          onDoubleClick={handleInboxSplitReset}
+          currentWidth={inboxWidth}
+          minWidth={240}
+          maxWidth={500}
+          breakpoint="md"
+          isLight={isLight}
+          ariaLabel="Resize assigned inbox and active conversation panels"
+        />
+      )}
 
       {/* CENTER WORKSPACE: Fixed Title Bar + Chat|AI Tabs + Scrollable Body + Keyboard-Safe Composer */}
       <div

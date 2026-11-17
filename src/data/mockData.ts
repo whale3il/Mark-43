@@ -1299,4 +1299,354 @@ export const INITIAL_AI_CONVERSATIONS: AiChatConversation[] = [
   }
 ];
 
+// -----------------------------------------------------------------------------
+// 20. Aureus Staff Portal (Dev-Only Fallback Records when Backend is Offline)
+// -----------------------------------------------------------------------------
+export const STAFF_PORTAL_PREVIEW_PROFILE = {
+  id: SUPPORT_AGENTS.marcus.id,
+  email: SUPPORT_AGENTS.marcus.email,
+  name: SUPPORT_AGENTS.marcus.name,
+  role: SUPPORT_AGENTS.marcus.role,
+  department: SUPPORT_AGENTS.marcus.department,
+  specialization: SUPPORT_AGENTS.marcus.specialization,
+  initials: SUPPORT_AGENTS.marcus.initials,
+  availability: 'ONLINE' as const,
+  maxChats: 5,
+  activeChatsCount: INITIAL_CONVERSATIONS.filter(
+    (c) => c.agent.id === SUPPORT_AGENTS.marcus.id && c.status === 'active'
+  ).length,
+  license: SUPPORT_AGENTS.marcus.license,
+  office: SUPPORT_AGENTS.marcus.office,
+  directPhone: SUPPORT_AGENTS.marcus.directPhone,
+  responseTime: SUPPORT_AGENTS.marcus.responseTime,
+  rating: SUPPORT_AGENTS.marcus.rating,
+};
+
+export const STAFF_PORTAL_TICKET_EXTENSIONS: Record<
+  string,
+  {
+    investigationNotes: string;
+    resolution?: string;
+    whisperNotes: Array<{
+      id: string;
+      ticketId: string;
+      authorId: string;
+      authorName: string;
+      content: string;
+      isWhisper: true;
+      createdAt: string;
+    }>;
+  }
+> = {
+  'TKT-8921-NY': {
+    investigationNotes:
+      'Verified available cash balance in Premier Liquidity Checking ($284,520.40) exceeds the $80,000 Treasury Reserve sweep. Single biometric signature matched.',
+    whisperNotes: [
+      {
+        id: 'wsp-8921-1',
+        ticketId: 'TKT-8921-NY',
+        authorId: 'agent-1',
+        authorName: 'Marcus Sterling',
+        content:
+          'Treasury floor confirmed 4.85% APY accrual begins same-day if posted before 16:00 EST cutoff.',
+        isWhisper: true,
+        createdAt: 'Today 10:15',
+      },
+    ],
+  },
+  'TKT-9012-TAX': {
+    investigationNotes:
+      'Drafted municipal bond tax-loss swap schedule for Geneva trust; awaiting countersignature from Swiss tax counsel.',
+    whisperNotes: [
+      {
+        id: 'wsp-9012-1',
+        ticketId: 'TKT-9012-TAX',
+        authorId: 'agent-1',
+        authorName: 'Marcus Sterling',
+        content:
+          'Do not execute block sell order until written K-1 addendum arrives from Zurich fiduciary.',
+        isWhisper: true,
+        createdAt: 'Today 11:25',
+      },
+    ],
+  },
+};
+
+export const STAFF_PORTAL_RECENT_ACTIVITY = [
+  {
+    id: 'staff-act-1',
+    type: 'message' as const,
+    title: 'Alexander V. Wright · Quarterly Liquid Yield & Syndicate Carry Sweep',
+    detail: 'Client approved $80,000 Treasury Reserve allocation instruction.',
+    timestamp: '10:42 AM',
+    relatedConversationId: 'conv-1',
+  },
+  {
+    id: 'staff-act-2',
+    type: 'ticket' as const,
+    title: 'TKT-9012-TAX · Q4 Sovereign Fiduciary Trust Tax-Loss Harvesting Mandate',
+    detail: 'Pending tax counsel signature · Priority High',
+    timestamp: '11:30 AM',
+    relatedTicketId: 'TKT-9012-TAX',
+  },
+  {
+    id: 'staff-act-3',
+    type: 'ticket' as const,
+    title: 'TKT-8921-NY · Treasury Reserve Yield Allocation ($80,000 Sweep)',
+    detail: 'In Review · Treasury desk allocation order prepared',
+    timestamp: '09:34 AM',
+    relatedTicketId: 'TKT-8921-NY',
+  },
+];
+
+export const STAFF_PORTAL_NOTIFICATION_PREFERENCES = {
+  newAssignmentAlert: true,
+  unreadMessageChime: true,
+  ticketEscalationAlert: true,
+  whisperMentionAlert: true,
+  desktopNotifications: false,
+};
+
+// -----------------------------------------------------------------------------
+// 21. Aureus Admin Portal (Dev-Only Fallback Records when Backend is Offline)
+// -----------------------------------------------------------------------------
+export const ADMIN_PORTAL_PREVIEW_PROFILE = {
+  id: 'admin-exec-1',
+  email: 'claire.dubois@aureusbank.com',
+  name: 'Claire Dubois',
+  initials: 'CD',
+  role: 'Chief Operations Administrator',
+  accessLevel: 'Executive Operations (L4)',
+  department: 'Executive Operations & Supervision',
+  office: '540 Madison Ave, Suite 3200, New York, NY',
+  permissions: {
+    canManageStaff: true,
+    canAssignTickets: true,
+    canViewReports: true,
+  },
+};
+
+export const ADMIN_PORTAL_STAFF_DIRECTORY = [
+  {
+    id: SUPPORT_AGENTS.marcus.id,
+    firstName: 'Marcus',
+    lastName: 'Sterling',
+    fullName: SUPPORT_AGENTS.marcus.name,
+    username: 'msterling',
+    email: SUPPORT_AGENTS.marcus.email || 'marcus.sterling@aureusbank.com',
+    department: SUPPORT_AGENTS.marcus.department,
+    role: SUPPORT_AGENTS.marcus.role,
+    availability: 'ONLINE' as const,
+    activeConversationsCount: SUPPORT_AGENTS.marcus.activeConversationsCount,
+    maxChats: 5,
+    accountStatus: 'ACTIVE' as const,
+    lastSeenAt: '2 mins ago',
+    createdAt: '2024-03-14',
+  },
+  {
+    id: SUPPORT_AGENTS.wire_desk.id,
+    firstName: 'Eleanor',
+    lastName: 'Vance',
+    fullName: SUPPORT_AGENTS.wire_desk.name,
+    username: 'evance',
+    email: SUPPORT_AGENTS.wire_desk.email || 'clearing.desk@aureusbank.com',
+    department: SUPPORT_AGENTS.wire_desk.department,
+    role: SUPPORT_AGENTS.wire_desk.role,
+    availability: 'ONLINE' as const,
+    activeConversationsCount: SUPPORT_AGENTS.wire_desk.activeConversationsCount,
+    maxChats: 6,
+    accountStatus: 'ACTIVE' as const,
+    lastSeenAt: 'Active now',
+    createdAt: '2024-01-22',
+  },
+  {
+    id: SUPPORT_AGENTS.card_concierge.id,
+    firstName: 'Julian',
+    lastName: 'Croft',
+    fullName: SUPPORT_AGENTS.card_concierge.name,
+    username: 'jcroft',
+    email: SUPPORT_AGENTS.card_concierge.email || 'concierge.obsidian@aureusbank.com',
+    department: SUPPORT_AGENTS.card_concierge.department,
+    role: SUPPORT_AGENTS.card_concierge.role,
+    availability: 'ONLINE' as const,
+    activeConversationsCount: SUPPORT_AGENTS.card_concierge.activeConversationsCount,
+    maxChats: 5,
+    accountStatus: 'ACTIVE' as const,
+    lastSeenAt: '4 mins ago',
+    createdAt: '2024-06-08',
+  },
+  {
+    id: SUPPORT_AGENTS.security_desk.id,
+    firstName: 'Aris',
+    lastName: 'Thorne',
+    fullName: SUPPORT_AGENTS.security_desk.name,
+    username: 'athorne',
+    email: SUPPORT_AGENTS.security_desk.email || 'infosec@aureusbank.com',
+    department: SUPPORT_AGENTS.security_desk.department,
+    role: SUPPORT_AGENTS.security_desk.role,
+    availability: 'BUSY' as const,
+    activeConversationsCount: SUPPORT_AGENTS.security_desk.activeConversationsCount,
+    maxChats: 4,
+    accountStatus: 'ACTIVE' as const,
+    lastSeenAt: 'Active now',
+    createdAt: '2023-11-05',
+  },
+  {
+    id: SUPPORT_AGENTS.lending_desk.id,
+    firstName: 'Seraphina',
+    lastName: 'Lin',
+    fullName: SUPPORT_AGENTS.lending_desk.name,
+    username: 'slin',
+    email: SUPPORT_AGENTS.lending_desk.email || 'seraphina.lin@aureusbank.com',
+    department: SUPPORT_AGENTS.lending_desk.department,
+    role: SUPPORT_AGENTS.lending_desk.role,
+    availability: 'AWAY' as const,
+    activeConversationsCount: SUPPORT_AGENTS.lending_desk.activeConversationsCount,
+    maxChats: 5,
+    accountStatus: 'ACTIVE' as const,
+    lastSeenAt: '12 mins ago',
+    createdAt: '2024-09-19',
+  },
+  {
+    id: 'agent-6',
+    firstName: 'Sarah',
+    lastName: 'Okafor',
+    fullName: 'Sarah Okafor',
+    username: 'sokafor',
+    email: 'sarah.okafor@aureusbank.com',
+    department: 'Treasury & Wires',
+    role: 'Settlement Operations Specialist',
+    availability: 'ONLINE' as const,
+    activeConversationsCount: 2,
+    maxChats: 5,
+    accountStatus: 'ACTIVE' as const,
+    lastSeenAt: 'Active now',
+    createdAt: '2025-02-10',
+  },
+];
+
+export const ADMIN_PORTAL_WAITING_QUEUE = [
+  {
+    id: 'conv-queue-1',
+    customerId: 'usr_david_mensah',
+    customerName: 'David Mensah',
+    customerTier: 'Sovereign Private Client',
+    subject: 'Failed ₦50,000 NIP Instant Transfer Reconciliation',
+    department: 'Treasury & Wires',
+    category: 'Transfers' as const,
+    lastMessage: 'Debited ₦50,000 twice on outward instant transfer #NIP-994182; awaiting automated settlement reversal.',
+    lastMessageTimestamp: '11:44 AM',
+    unreadCount: 2,
+    status: 'pending' as const,
+    linkedTicketId: 'TKT-9045-NIP',
+    waitingSince: '4m',
+    isUnassigned: false,
+    assignedStaffId: 'agent-6',
+    assignedStaffName: 'Sarah Okafor',
+  },
+  {
+    id: 'conv-queue-2',
+    customerId: 'usr_sophia_almansoor',
+    customerName: 'Sophia Al-Mansoor',
+    customerTier: 'Aureus Royal Sovereign',
+    subject: 'DIFC Liquidity Mandate Amendment — Unassigned Queue',
+    department: 'Private Wealth',
+    category: 'General Support' as const,
+    lastMessage: 'Requesting immediate custodian sign-off on AED/USD forward hedge amendment prior to Dubai close.',
+    lastMessageTimestamp: '11:48 AM',
+    unreadCount: 1,
+    status: 'pending' as const,
+    waitingSince: '2m',
+    isUnassigned: true,
+  },
+];
+
+export const ADMIN_PORTAL_EXTRA_TICKETS: SupportTicket[] = [
+  {
+    id: 'TKT-9045-NIP',
+    subject: 'Failed ₦50,000 Instant Transfer Reconciliation (#NIP-994182)',
+    category: 'Wire Clearance',
+    priority: 'Urgent',
+    status: 'In Review',
+    createdAt: '2026-11-16 11:40',
+    updatedAt: '2026-11-16 11:45',
+    assignedAgent: 'Sarah Okafor',
+    assignedAgentId: 'agent-6',
+    customerId: 'usr_david_mensah',
+    customerName: 'David Mensah',
+    description:
+      'Client David Mensah reported a failed ₦50,000 transfer with duplicate ledger hold. Aureus auto-routed to Sarah Okafor (Treasury & Wires) for clearing trace.',
+    conversationId: 'conv-queue-1',
+  },
+  {
+    id: 'TKT-9039-ESC',
+    subject: 'Mayfair $2.4M SWIFT GPI Settlement Cutoff Escalation',
+    category: 'Wire Clearance',
+    priority: 'Urgent',
+    status: 'Escalated',
+    createdAt: '2026-11-16 10:12',
+    updatedAt: '2026-11-16 11:20',
+    assignedAgent: 'Eleanor Vance',
+    assignedAgentId: 'agent-2',
+    customerId: 'usr_victoria_montclaire',
+    customerName: 'Victoria Montclaire',
+    description:
+      'Correspondent bank Coutts London requested expedited compliance attestation for $2.4M completion escrow before 14:00 GMT.',
+    conversationId: 'conv-3',
+  },
+];
+
+export const ADMIN_PORTAL_ACTIVITY_FEED = [
+  {
+    id: 'adm-act-1',
+    type: 'escalation' as const,
+    title: 'TKT-9039-ESC · Mayfair $2.4M SWIFT GPI Cutoff Escalation',
+    detail: 'Escalated to Urgent · Assigned to Eleanor Vance (Treasury & Wires)',
+    timestamp: '11:20 AM',
+    relatedTicketId: 'TKT-9039-ESC',
+    relatedConversationId: 'conv-3',
+  },
+  {
+    id: 'adm-act-2',
+    type: 'assignment' as const,
+    title: 'Auto-Assigned TKT-9045-NIP → Sarah Okafor',
+    detail: 'David Mensah · Failed ₦50,000 instant transfer routed by Treasury skill rule',
+    timestamp: '11:42 AM',
+    relatedTicketId: 'TKT-9045-NIP',
+  },
+  {
+    id: 'adm-act-3',
+    type: 'queue' as const,
+    title: 'Unassigned Queue Alert · Sophia Al-Mansoor',
+    detail: 'DIFC Liquidity Mandate Amendment awaiting Private Wealth specialist',
+    timestamp: '11:48 AM',
+    relatedConversationId: 'conv-queue-2',
+  },
+  {
+    id: 'adm-act-4',
+    type: 'staff' as const,
+    title: 'Dr. Aris Thorne status changed to BUSY',
+    detail: 'Handling DIFC YubiKey FIDO2 hardware verification audit',
+    timestamp: '11:05 AM',
+  },
+];
+
+export const ADMIN_PORTAL_DEPARTMENT_METRICS = [
+  { department: 'Treasury & Wires', activeConversations: 3, openTickets: 3, onlineStaff: 2 },
+  { department: 'Private Wealth', activeConversations: 2, openTickets: 2, onlineStaff: 1 },
+  { department: 'Card Concierge', activeConversations: 1, openTickets: 1, onlineStaff: 1 },
+  { department: 'Institutional Lending', activeConversations: 1, openTickets: 1, onlineStaff: 0 },
+  { department: 'Security & Compliance', activeConversations: 0, openTickets: 0, onlineStaff: 0 },
+];
+
+export const ADMIN_PORTAL_NOTIFICATION_PREFERENCES = {
+  escalationAlerts: true,
+  unassignedQueueAlerts: true,
+  staffStatusAlerts: true,
+  slaBreachWarnings: true,
+  desktopNotifications: false,
+};
+
+
+
 

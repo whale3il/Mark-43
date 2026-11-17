@@ -20,6 +20,8 @@ interface StaffInboxPanelProps {
   onToggleCollapse: () => void;
   isLoading: boolean;
   theme: 'dark' | 'light';
+  widthPx?: number;
+  isResizing?: boolean;
 }
 
 export const StaffInboxPanel: React.FC<StaffInboxPanelProps> = ({
@@ -34,6 +36,8 @@ export const StaffInboxPanel: React.FC<StaffInboxPanelProps> = ({
   onToggleCollapse,
   isLoading,
   theme,
+  widthPx,
+  isResizing = false,
 }) => {
   const isLight = theme === 'light';
 
@@ -107,7 +111,18 @@ export const StaffInboxPanel: React.FC<StaffInboxPanelProps> = ({
 
   return (
     <div
-      className={`w-full md:w-[290px] xl:w-[320px] shrink-0 md:border-r flex flex-col min-h-0 h-full overflow-hidden ${
+      style={
+        widthPx
+          ? ({ '--staff-inbox-w': `${widthPx}px` } as React.CSSProperties)
+          : undefined
+      }
+      className={`w-full ${
+        widthPx ? 'md:w-[var(--staff-inbox-w)]' : 'md:w-[290px] xl:w-[320px]'
+      } ${
+        isResizing ? 'transition-none' : 'transition-[width] duration-150'
+      } shrink-0 ${
+        widthPx ? '' : 'md:border-r'
+      } flex flex-col min-h-0 h-full overflow-hidden ${
         isLight
           ? 'bg-slate-50/70 border-slate-200'
           : 'bg-neutral-950/50 border-neutral-800'

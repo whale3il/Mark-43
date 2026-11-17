@@ -22,6 +22,7 @@ export const STAFF_CONFIG = {
   apiBaseUrl: normalizeStaffApiBaseUrl(RAW_STAFF_API_BASE),
   themeStorageKey: 'aureus_theme',
   sidebarStorageKey: 'aureus_staff_sidebar_collapsed',
+  sidebarModeStorageKey: 'aureus_staff_sidebar_mode',
   defaultMaxChats: 5,
   routes: {
     root: '/staff',

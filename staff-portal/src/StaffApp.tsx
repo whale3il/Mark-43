@@ -54,13 +54,19 @@ const StaffPortalShell: React.FC<{
 }> = ({ pathname, search, onNavigate }) => {
   const {
     staff,
+    isAuthenticated,
+    isPreviewMode,
     isLoadingSession,
     realtimeStatus,
     theme,
     setTheme,
+    sidebarMode,
+    setSidebarMode,
     notificationPrefs,
     updateNotificationPrefs,
     signOut,
+    refreshSession,
+    exitDevPreviewMode,
     updateAvailabilityConfirmed,
     syncActiveChatsCount,
   } = useStaffAuth();
@@ -76,7 +82,7 @@ const StaffPortalShell: React.FC<{
   const isSetPasswordPath = normalizedPath === STAFF_CONFIG.routes.setPassword;
   const isPublicAuthPath = isSignInPath || isInvitePath || isSetPasswordPath;
 
-  // Protected workspace data state (strictly scoped to authenticated staff)
+  // Protected workspace data state (strictly scoped to authenticated or preview staff)
   const [conversations, setConversations] = useState<StaffConversation[]>([]);
   const [customers, setCustomers] = useState<Record<string, CustomerProfile>>({});
   const [tickets, setTickets] = useState<StaffTicket[]>([]);
@@ -86,6 +92,10 @@ const StaffPortalShell: React.FC<{
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
   const [isLoadingData, setIsLoadingData] = useState<boolean>(false);
   const [dataError, setDataError] = useState<string | null>(null);
+  const [previewFallbackSources, setPreviewFallbackSources] = useState<string[]>([]);
+  const [previewFallbackReason, setPreviewFallbackReason] = useState<string | undefined>(
+    undefined
+  );
 
   // Route protection & canonical redirects
   useEffect(() => {
@@ -98,13 +108,23 @@ const StaffPortalShell: React.FC<{
       return;
     }
 
-    // Authenticated staff visiting /staff or /staff/signin -> redirect to /staff/dashboard
-    if (normalizedPath === '/staff' || isSignInPath) {
+    // Authenticated staff visiting /staff or /staff/signin -> redirect to /staff/dashboard.
+    // Allow preview mode users to stay on /staff/signin if they explicitly return there to sign in.
+    if (normalizedPath === '/staff' || (isSignInPath && isAuthenticated)) {
       onNavigate(STAFF_CONFIG.routes.dashboard, true);
     }
-  }, [isLoadingSession, staff, normalizedPath, isPublicAuthPath, isSignInPath, onNavigate]);
+  }, [
+    isLoadingSession,
+    staff,
+    isAuthenticated,
+    normalizedPath,
+    isPublicAuthPath,
+    isSignInPath,
+    onNavigate,
+  ]);
 
-  // Fetch scoped conversations, tickets, overview, and canned responses once authenticated
+  // Fetch scoped conversations, tickets, overview, and canned responses.
+  // Automatically uses live Express endpoints whenever available; dev-only fallback flags preview mode.
   const loadDeskData = useCallback(async () => {
     if (!staff) return;
     setIsLoadingData(true);
@@ -112,13 +132,15 @@ const StaffPortalShell: React.FC<{
 
     try {
       const [convRes, ticketRes, overviewRes, cannedRes] = await Promise.all([
-        staffPortalService.listScopedConversations(),
-        staffPortalService.listScopedTickets(),
-        staffPortalService.getOverview(),
+        staffPortalService.listScopedConversations(staff.id),
+        staffPortalService.listScopedTickets(staff.id),
+        staffPortalService.getOverview(staff.id),
         staffPortalService.listCannedResponses(),
       ]);
 
       const errors: string[] = [];
+      const fallbackSources: string[] = [];
+      let firstReason: string | undefined;
 
       if (convRes.success && convRes.data) {
         setConversations(convRes.data.conversations);
@@ -134,23 +156,42 @@ const StaffPortalShell: React.FC<{
           (c) => c.status === 'active'
         ).length;
         syncActiveChatsCount(activeChats);
+        if (convRes.isMockFallback) {
+          fallbackSources.push('conversations');
+          firstReason ||= convRes.fallbackReason;
+        }
       } else if (convRes.error) {
         errors.push(convRes.error.message);
       }
 
       if (ticketRes.success && ticketRes.data) {
         setTickets(ticketRes.data);
+        if (ticketRes.isMockFallback) {
+          fallbackSources.push('tickets');
+          firstReason ||= ticketRes.fallbackReason;
+        }
       } else if (ticketRes.error) {
         errors.push(ticketRes.error.message);
       }
 
       if (overviewRes.success && overviewRes.data?.recentActivity) {
         setRecentActivity(overviewRes.data.recentActivity);
+        if (overviewRes.isMockFallback) {
+          fallbackSources.push('overview');
+          firstReason ||= overviewRes.fallbackReason;
+        }
       }
 
       if (cannedRes.success && cannedRes.data) {
         setCannedResponses(cannedRes.data);
+        if (cannedRes.isMockFallback) {
+          fallbackSources.push('canned responses');
+          firstReason ||= cannedRes.fallbackReason;
+        }
       }
+
+      setPreviewFallbackSources(fallbackSources);
+      setPreviewFallbackReason(firstReason);
 
       if (errors.length > 0) {
         setDataError(errors[0]);
@@ -168,6 +209,8 @@ const StaffPortalShell: React.FC<{
       setTickets([]);
       setCustomers({});
       setRecentActivity([]);
+      setPreviewFallbackSources([]);
+      setPreviewFallbackReason(undefined);
       setSelectedConversationId('');
       setSelectedTicketId(null);
     }
@@ -197,6 +240,15 @@ const StaffPortalShell: React.FC<{
       unsubTicket();
     };
   }, [staff?.id, loadDeskData]);
+
+  const handleRetryLiveConnection = useCallback(async () => {
+    const authed = await refreshSession();
+    if (authed) {
+      await loadDeskData();
+    } else if (staff) {
+      await loadDeskData();
+    }
+  }, [refreshSession, loadDeskData, staff]);
 
   // Session restoration splash
   if (isLoadingSession) {
@@ -260,9 +312,19 @@ const StaffPortalShell: React.FC<{
       activeSection={activeSection}
       onSelectSection={(sec) => onNavigate(sectionToPath(sec))}
       onSignOut={signOut}
+      sidebarMode={sidebarMode}
+      onChangeSidebarMode={setSidebarMode}
       unreadConversationsCount={unreadConversationsCount}
       openTicketsCount={openTicketsCount}
       realtimeStatus={realtimeStatus}
+      previewInfo={{
+        active: isPreviewMode || previewFallbackSources.length > 0,
+        isAuthenticated,
+        sources: previewFallbackSources,
+        reason: previewFallbackReason,
+        onRetryLive: handleRetryLiveConnection,
+        onReturnToSignIn: exitDevPreviewMode,
+      }}
       theme={theme}
     >
       {activeSection === 'overview' && (
@@ -345,6 +407,8 @@ const StaffPortalShell: React.FC<{
           staff={staff}
           theme={theme}
           onSetTheme={setTheme}
+          sidebarMode={sidebarMode}
+          onChangeSidebarMode={setSidebarMode}
           notificationPrefs={notificationPrefs}
           onSaveNotificationPrefs={updateNotificationPrefs}
         />

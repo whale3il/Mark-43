@@ -35,6 +35,10 @@ import { ablyService } from '../services/ablyService';
 import { SupportService } from '../services/supportService';
 import { CustomerWelcomeModal } from './support/CustomerWelcomeModal';
 import { AiChatWorkspace } from './support/AiChatWorkspace';
+import {
+  useResizablePaneWidth,
+  ResizableSplitDivider,
+} from './support/ResizableMessagingSplit';
 
 interface SupportViewProps {
   staffList?: SupportAgent[];
@@ -73,6 +77,21 @@ export const SupportView: React.FC<SupportViewProps> = ({
   const [staffSectionExpanded, setStaffSectionExpanded] = useState<boolean>(true);
   // Mobile pane prioritization: active conversation first, intuitive switch to queue/specialists
   const [mobilePane, setMobilePane] = useState<'chat' | 'list'>('chat');
+  const splitContainerRef = useRef<HTMLDivElement | null>(null);
+  const {
+    width: supportListWidth,
+    isDragging: isResizingSupportList,
+    handlePointerDown: handleSupportSplitPointerDown,
+    handleKeyDown: handleSupportSplitKeyDown,
+    handleResetWidth: handleSupportSplitReset,
+  } = useResizablePaneWidth({
+    storageKey: 'aureus_customer_support_list_width',
+    defaultWidth: 330,
+    minWidth: 250,
+    maxWidth: 520,
+    minRemainingWidth: 380,
+    containerRef: splitContainerRef,
+  });
 
   const customerId = currentCustomer?.id || 'usr_alexander_wright';
   const customerName = currentCustomer?.name || 'Private Client';
@@ -555,19 +574,27 @@ export const SupportView: React.FC<SupportViewProps> = ({
       {/* CHAT TAB: FULL-HEIGHT FLEXIBLE TWO-PANEL LAYOUT */}
       {activeSubTab === 'chat' && (
         <div
+          ref={splitContainerRef}
           className={`flex-1 min-h-0 rounded-2xl border shadow-xl overflow-hidden flex flex-col lg:flex-row ${
             isLight ? 'bg-white border-slate-200' : 'bg-neutral-900 border-neutral-800'
           }`}
         >
           {/* Inner Support Sidebar (Expanded by default, Manual Collapse/Expand Toggle on desktop; dedicated pane on mobile) */}
           <div
+            style={
+              !isInnerSidebarCollapsed
+                ? ({ '--support-list-w': `${supportListWidth}px` } as React.CSSProperties)
+                : undefined
+            }
             className={`${
               mobilePane === 'list' ? 'flex flex-1 lg:flex-none' : 'hidden lg:flex'
             } ${
               isInnerSidebarCollapsed
-                ? 'w-full lg:w-[68px]'
-                : 'w-full lg:w-[310px] xl:w-[350px]'
-            } shrink-0 lg:border-r flex-col min-h-0 transition-[width] duration-200 overflow-hidden ${
+                ? 'w-full lg:w-[68px] lg:border-r'
+                : 'w-full lg:w-[var(--support-list-w)]'
+            } shrink-0 flex-col min-h-0 ${
+              isResizingSupportList ? 'transition-none' : 'transition-[width] duration-200'
+            } overflow-hidden ${
               isLight ? 'border-slate-200 bg-slate-50/70' : 'border-neutral-800 bg-neutral-950/40'
             }`}
           >
@@ -982,6 +1009,21 @@ export const SupportView: React.FC<SupportViewProps> = ({
               </>
             )}
           </div>
+
+          {!isInnerSidebarCollapsed && (
+            <ResizableSplitDivider
+              isDragging={isResizingSupportList}
+              onPointerDown={handleSupportSplitPointerDown}
+              onKeyDown={handleSupportSplitKeyDown}
+              onDoubleClick={handleSupportSplitReset}
+              currentWidth={supportListWidth}
+              minWidth={250}
+              maxWidth={520}
+              breakpoint="lg"
+              isLight={isLight}
+              ariaLabel="Resize support queue and active chat panels"
+            />
+          )}
 
           {/* Right Panel: Active Chat */}
           <div

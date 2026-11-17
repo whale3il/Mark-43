@@ -12,10 +12,7 @@ import {
   INITIAL_SESSIONS,
   USER_PROFILE,
   SUPPORT_STAFF_LIST,
-  SUPPORT_CUSTOMERS,
   INITIAL_SUPPORT_CONVERSATIONS,
-  INITIAL_CANNED_RESPONSES,
-  INITIAL_SUPPORT_ANALYTICS,
   INITIAL_TICKETS
 } from './data/mockData';
 import {
@@ -29,14 +26,8 @@ import {
 } from './types/banking';
 import {
   SupportAgent,
-  SupportMessage,
   SupportConversation,
-  SupportTicket,
-  CannedResponse,
-  SupportAnalytics,
-  UserPortalRole,
-  StaffAvailability,
-  TicketStatus
+  SupportTicket
 } from './types/support';
 import { Header } from './components/Header';
 import { Sidebar, NavTab } from './components/Sidebar';
@@ -50,8 +41,6 @@ import { BillsView } from './components/BillsView';
 import { StatementsView } from './components/StatementsView';
 import { SecurityView } from './components/SecurityView';
 import { SupportView } from './components/SupportView';
-import { StaffWorkspaceView } from './components/support/StaffWorkspaceView';
-import { SuperAdminSupportView } from './components/support/SuperAdminSupportView';
 import { DesignSpecView } from './components/DesignSpecView';
 import { TransactionReceiptModal } from './components/TransactionReceiptModal';
 import { OpenVaultModal } from './components/OpenVaultModal';
@@ -100,26 +89,13 @@ export default function App() {
     showToast(`Switched to ${next === 'light' ? 'Executive Slate Light' : 'Obsidian Dark'} theme`);
   };
 
-  // Portal Mode State ('CLIENT' | 'STAFF' | 'ADMIN') synchronized with URL pathname
-  const [portalMode, setPortalMode] = useState<UserPortalRole>(() => {
-    if (typeof window !== 'undefined') {
-      const path = window.location.pathname.toLowerCase();
-      if (path === '/staff' || path.startsWith('/staff/')) return 'STAFF';
-      if (path === '/admin' || path.startsWith('/admin/')) return 'ADMIN';
-    }
-    return 'CLIENT';
-  });
-
   // Dedicated Support Unread Counter State
   const [supportUnreadCount, setSupportUnreadCount] = useState<number>(2);
 
-  // Support System State (ready for Express, Supabase & Ably backend)
+  // Customer Support State (connected to Express, Supabase & Ably backend)
   const [staffList, setStaffList] = useState<SupportAgent[]>(SUPPORT_STAFF_LIST);
   const [supportConversations, setSupportConversations] = useState<SupportConversation[]>(INITIAL_SUPPORT_CONVERSATIONS);
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>(INITIAL_TICKETS);
-  const [supportCustomers, setSupportCustomers] = useState(SUPPORT_CUSTOMERS);
-  const [cannedResponses, setCannedResponses] = useState<CannedResponse[]>(INITIAL_CANNED_RESPONSES);
-  const [supportAnalytics, setSupportAnalytics] = useState<SupportAnalytics>(INITIAL_SUPPORT_ANALYTICS);
 
   // Authentication & Session State (pure frontend client state)
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
@@ -148,32 +124,6 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Synchronize browser history and URL with portal changes
-  useEffect(() => {
-    const handlePopState = () => {
-      const path = window.location.pathname.toLowerCase();
-      if (path === '/staff' || path.startsWith('/staff/')) {
-        setPortalMode('STAFF');
-      } else if (path === '/admin' || path.startsWith('/admin/')) {
-        setPortalMode('ADMIN');
-      } else {
-        setPortalMode('CLIENT');
-      }
-    };
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
-
-  const handleSetPortalMode = (mode: UserPortalRole) => {
-    setPortalMode(mode);
-    if (typeof window !== 'undefined') {
-      const targetPath = mode === 'STAFF' ? '/staff' : mode === 'ADMIN' ? '/admin' : '/';
-      if (window.location.pathname !== targetPath) {
-        window.history.pushState(null, '', targetPath);
-      }
-    }
-  };
-
   // Fetch initial data from server-side Prisma & Supabase backend and subscribe to realtime events
   useEffect(() => {
     const fetchServerData = async () => {
@@ -197,9 +147,6 @@ export default function App() {
           if (supportRes.data.staffList) setStaffList(supportRes.data.staffList);
           if (supportRes.data.conversations) setSupportConversations(supportRes.data.conversations);
           if (supportRes.data.tickets) setSupportTickets(supportRes.data.tickets);
-          if (supportRes.data.customers) setSupportCustomers(supportRes.data.customers);
-          if (supportRes.data.cannedResponses) setCannedResponses(supportRes.data.cannedResponses);
-          if (supportRes.data.analytics) setSupportAnalytics(supportRes.data.analytics);
         }
       } catch (err) {
         console.error('Initial dashboard sync error:', err);
@@ -471,72 +418,7 @@ export default function App() {
     }
   };
 
-  // Support Workspace Handlers (decoupled via SupportService for Express/PostgreSQL/Supabase & Ably)
-  const handleUpdateStaffAvailability = async (staffId: string, status: StaffAvailability) => {
-    setStaffList((prev) =>
-      prev.map((s) => (s.id === staffId ? { ...s, availability: status, status, online: status !== 'offline' } : s))
-    );
-    setSupportConversations((prev) =>
-      prev.map((c) =>
-        c.agent.id === staffId
-          ? { ...c, agent: { ...c.agent, availability: status, status, online: status !== 'offline' } }
-          : c
-      )
-    );
-    await SupportService.updateStaffAvailability(staffId, status);
-    showToast(`Staff desk status updated to ${status}.`);
-  };
-
-  const handleUpdateSupportConversation = async (updatedConv: SupportConversation) => {
-    setSupportConversations((prev) => prev.map((c) => (c.id === updatedConv.id ? updatedConv : c)));
-    await SupportService.updateConversation(updatedConv.id, {
-      status: updatedConv.status,
-      internalNotes: updatedConv.internalNotes,
-      unreadCount: updatedConv.unreadCount
-    });
-  };
-
-  const handleTransferConversation = async (conversationId: string, targetStaffId: string, note?: string) => {
-    const targetStaff = staffList.find((s) => s.id === targetStaffId);
-    if (!targetStaff) return;
-
-    setSupportConversations((prev) =>
-      prev.map((c) => {
-        if (c.id !== conversationId) return c;
-        const updatedNotes = note
-          ? Array.isArray(c.internalNotes)
-            ? [...c.internalNotes, `[Transfer note]: ${note}`]
-            : c.internalNotes
-            ? `${c.internalNotes} | [Transfer note]: ${note}`
-            : `[Transfer note]: ${note}`
-          : c.internalNotes;
-
-        const transferMsg: SupportMessage = {
-          id: `msg-trans-${Date.now()}`,
-          conversationId: c.id,
-          sender: 'system',
-          text: `Conversation transferred to ${targetStaff.name} (${targetStaff.department}).`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          status: 'delivered'
-        };
-        return {
-          ...c,
-          agent: targetStaff,
-          internalNotes: updatedNotes,
-          messages: [...c.messages, transferMsg],
-          lastMessage: transferMsg.text
-        };
-      })
-    );
-
-    setStaffList((prev) =>
-      prev.map((s) => (s.id === targetStaffId ? { ...s, activeConversationsCount: (s.activeConversationsCount || 0) + 1 } : s))
-    );
-
-    await SupportService.transferConversation(conversationId, targetStaffId, note);
-    showToast(`Ticket & conversation successfully routed to ${targetStaff.name}.`);
-  };
-
+  // Customer Support Ticket Submission
   const handleCreateTicket = async (ticket: SupportTicket) => {
     setSupportTickets((prev) => [ticket, ...prev]);
     await SupportService.createTicket({
@@ -550,31 +432,6 @@ export default function App() {
       customerName: ticket.customerName
     });
     showToast(`Support ticket ${ticket.id} logged with desk.`);
-  };
-
-  const handleUpdateTicketStatus = async (ticketId: string, status: TicketStatus) => {
-    const nowStr = new Date().toISOString().slice(0, 16).replace('T', ' ');
-    setSupportTickets((prev) =>
-      prev.map((t) => (t.id === ticketId ? { ...t, status, updatedAt: nowStr } : t))
-    );
-    await SupportService.updateTicketStatus(ticketId, status);
-    showToast(`Ticket ${ticketId} marked as ${status}.`);
-  };
-
-  const handleAddCannedResponse = async (newTemplate: Omit<CannedResponse, 'id'>) => {
-    const res = await SupportService.addCannedResponse(newTemplate);
-    const template: CannedResponse = res.data || {
-      ...newTemplate,
-      id: `canned-${Date.now()}`
-    };
-    setCannedResponses((prev) => [...prev, template]);
-    showToast(`Canned template "${template.shortcut}" created.`);
-  };
-
-  const handleDeleteCannedResponse = async (templateId: string) => {
-    setCannedResponses((prev) => prev.filter((t) => t.id !== templateId));
-    await SupportService.deleteCannedResponse(templateId);
-    showToast('Template deleted.');
   };
 
   // Render Authentication Flow when not logged in
@@ -612,18 +469,13 @@ export default function App() {
     );
   }
 
-  const isSupportWorkspace =
-    portalMode === 'STAFF' ||
-    portalMode === 'ADMIN' ||
-    (portalMode === 'CLIENT' && activeTab === 'support' && !isDesignMode);
+  const isSupportWorkspace = activeTab === 'support' && !isDesignMode;
 
   return (
     <div className={`h-dvh flex flex-col overflow-hidden ${theme === 'light' ? 'bg-slate-50 text-slate-900' : 'bg-neutral-950 text-neutral-100'} font-sans antialiased selection:bg-emerald-500/20 selection:text-emerald-300 transition-colors duration-200`}>
-      {/* Top Bar Contract — omitted inside Support workspaces (User, Staff, Admin) for full viewport height */}
+      {/* Top Bar Contract — omitted inside Customer Support workspace for full viewport height */}
       {!isSupportWorkspace && (
         <Header
-          portalMode={portalMode}
-          setPortalMode={handleSetPortalMode}
           maskBalance={maskBalance}
           setMaskBalance={setMaskBalance}
           isDesignMode={isDesignMode}
@@ -633,14 +485,12 @@ export default function App() {
           notifications={notifications}
           setNotifications={setNotifications}
           onOpenTransfer={() => {
-            handleSetPortalMode('CLIENT');
             setActiveTab('transfers');
             if (isDesignMode) setIsDesignMode(false);
           }}
           theme={theme}
           toggleTheme={toggleTheme}
           onNavigateSupport={() => {
-            handleSetPortalMode('CLIENT');
             setActiveTab('support');
             if (isDesignMode) setIsDesignMode(false);
           }}
@@ -664,17 +514,14 @@ export default function App() {
         </div>
       )}
 
-      {/* Main Workspace Frame — Original Main Sidebar persists across Client, Staff, and Admin portals */}
+      {/* Main Workspace Frame */}
       <div className="flex-1 flex w-full min-h-0 overflow-hidden">
         <Sidebar
-          portalMode={portalMode}
-          onSelectPortal={handleSetPortalMode}
           activeTab={activeTab}
           setActiveTab={setActiveTab}
           isDesignMode={isDesignMode}
           setIsDesignMode={setIsDesignMode}
           onOpenAdvisorModal={() => {
-            handleSetPortalMode('CLIENT');
             setActiveTab('support');
             if (isDesignMode) setIsDesignMode(false);
           }}
@@ -688,7 +535,7 @@ export default function App() {
           theme={theme}
         />
 
-        {/* Viewport Content Area — Dedicated full-height flexible shell for Support (User, Staff, Admin); unchanged everywhere else */}
+        {/* Viewport Content Area */}
         <main
           className={`flex-1 min-w-0 min-h-0 h-full max-w-full ${
             isSupportWorkspace
@@ -696,21 +543,17 @@ export default function App() {
               : 'p-4 md:p-8 overflow-y-auto'
           }`}
         >
-          {/* Mobile Tab & Portal Nav Selector */}
+          {/* Mobile Tab Selector */}
           <div className={`md:hidden ${isSupportWorkspace ? 'mb-1.5 pb-1.5' : 'mb-2.5 pb-2'} flex items-center justify-between border-b shrink-0 ${theme === 'light' ? 'border-slate-200' : 'border-neutral-800'}`}>
             <div className="flex items-center gap-2">
               <span className={`text-xs font-semibold capitalize ${theme === 'light' ? 'text-slate-800' : 'text-neutral-300'}`}>
-                {portalMode === 'STAFF'
-                  ? 'Staff Desk'
-                  : portalMode === 'ADMIN'
-                  ? 'Super Admin'
-                  : isDesignMode
+                {isDesignMode
                   ? 'Design System Specs'
                   : activeTab === 'support'
                   ? 'Customer Support'
                   : activeTab}
               </span>
-              {portalMode === 'CLIENT' && activeTab === 'support' && supportUnreadCount > 0 && (
+              {activeTab === 'support' && supportUnreadCount > 0 && (
                 <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-emerald-500 text-neutral-950 font-bold">
                   {supportUnreadCount} unread
                 </span>
@@ -752,13 +595,12 @@ export default function App() {
                 <button
                   key={tab.id}
                   onClick={() => {
-                    handleSetPortalMode('CLIENT');
                     setActiveTab(tab.id as NavTab);
                     setIsDesignMode(false);
                     setMobileMenuOpen(false);
                   }}
                   className={`p-2 rounded-lg text-left transition-colors flex items-center justify-between ${
-                    portalMode === 'CLIENT' && activeTab === tab.id && !isDesignMode
+                    activeTab === tab.id && !isDesignMode
                       ? 'bg-emerald-500/10 text-emerald-400 font-semibold'
                       : theme === 'light'
                       ? 'text-slate-600 hover:bg-slate-100'
@@ -773,39 +615,6 @@ export default function App() {
               ))}
               <button
                 onClick={() => {
-                  handleSetPortalMode('STAFF');
-                  setIsDesignMode(false);
-                  setMobileMenuOpen(false);
-                }}
-                className={`p-2 rounded-lg text-left transition-colors font-medium ${
-                  portalMode === 'STAFF'
-                    ? 'bg-sky-500/15 text-sky-400 font-semibold border border-sky-500/30'
-                    : theme === 'light'
-                    ? 'text-slate-700 bg-slate-100'
-                    : 'text-neutral-300 bg-neutral-800/60'
-                }`}
-              >
-                Staff Desk (/staff)
-              </button>
-              <button
-                onClick={() => {
-                  handleSetPortalMode('ADMIN');
-                  setIsDesignMode(false);
-                  setMobileMenuOpen(false);
-                }}
-                className={`p-2 rounded-lg text-left transition-colors font-medium ${
-                  portalMode === 'ADMIN'
-                    ? 'bg-purple-500/15 text-purple-400 font-semibold border border-purple-500/30'
-                    : theme === 'light'
-                    ? 'text-slate-700 bg-slate-100'
-                    : 'text-neutral-300 bg-neutral-800/60'
-                }`}
-              >
-                Super Admin (/admin)
-              </button>
-              <button
-                onClick={() => {
-                  handleSetPortalMode('CLIENT');
                   setIsDesignMode(true);
                   setMobileMenuOpen(false);
                 }}
@@ -829,38 +638,8 @@ export default function App() {
             </div>
           )}
 
-          {/* Conditional Portal & View Rendering */}
-          {portalMode === 'STAFF' ? (
-            <div className="flex-1 min-h-0 flex flex-col">
-              <StaffWorkspaceView
-                staffList={staffList}
-                conversations={supportConversations}
-                tickets={supportTickets}
-                customers={supportCustomers}
-                cannedResponses={cannedResponses}
-                onUpdateConversation={handleUpdateSupportConversation}
-                onUpdateStaffAvailability={handleUpdateStaffAvailability}
-                onUpdateTicketStatus={handleUpdateTicketStatus}
-                onTransferConversation={handleTransferConversation}
-                theme={theme}
-              />
-            </div>
-          ) : portalMode === 'ADMIN' ? (
-            <div className="flex-1 min-h-0 flex flex-col">
-              <SuperAdminSupportView
-                staffList={staffList}
-                conversations={supportConversations}
-                tickets={supportTickets}
-                cannedResponses={cannedResponses}
-                analytics={supportAnalytics}
-                onUpdateStaffAvailability={handleUpdateStaffAvailability}
-                onReassignConversation={handleTransferConversation}
-                onAddCannedResponse={handleAddCannedResponse}
-                onDeleteCannedResponse={handleDeleteCannedResponse}
-                theme={theme}
-              />
-            </div>
-          ) : isDesignMode ? (
+          {/* Conditional Customer & Design View Rendering */}
+          {isDesignMode ? (
             <DesignSpecView onReturnToApp={() => setIsDesignMode(false)} />
           ) : (
             <>

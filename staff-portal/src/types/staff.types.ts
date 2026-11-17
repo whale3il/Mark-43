@@ -40,6 +40,8 @@ export type StaffRoute =
   | '/staff/availability'
   | '/staff/settings';
 
+export type StaffSidebarMode = 'expanded' | 'collapsed' | 'hover';
+
 export type StaffNavSection =
   | 'overview'
   | 'conversations'
@@ -190,4 +192,6 @@ export interface StaffApiResult<T = unknown> {
   data?: T;
   message?: string;
   error?: StaffApiError;
+  isMockFallback?: boolean;
+  fallbackReason?: string;
 }

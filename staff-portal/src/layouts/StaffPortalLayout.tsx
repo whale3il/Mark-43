@@ -6,8 +6,6 @@ import {
   Radio,
   Settings,
   LogOut,
-  PanelLeftClose,
-  PanelLeftOpen,
   Menu,
   X,
   ShieldCheck,
@@ -17,18 +15,35 @@ import {
   StaffAvailabilityEnum,
   StaffMemberProfile,
   StaffNavSection,
+  StaffSidebarMode,
 } from '../types/staff.types';
-import { STAFF_CONFIG } from '../config/staffConfig';
 import { RealtimeConnectionStatus } from '../services/staffAblyService';
+import {
+  CollapsedSidebarTooltip,
+  SidebarDisplayControl,
+  useCollapsedSidebarTooltip,
+} from '@/src/components/SidebarDisplayControl';
+
+export interface StaffPreviewBannerInfo {
+  active: boolean;
+  isAuthenticated: boolean;
+  sources: string[];
+  reason?: string;
+  onRetryLive: () => void;
+  onReturnToSignIn?: () => void;
+}
 
 interface StaffPortalLayoutProps {
   staff: StaffMemberProfile;
   activeSection: StaffNavSection;
   onSelectSection: (section: StaffNavSection) => void;
   onSignOut: () => Promise<void>;
+  sidebarMode: StaffSidebarMode;
+  onChangeSidebarMode: (mode: StaffSidebarMode) => void;
   unreadConversationsCount: number;
   openTicketsCount: number;
   realtimeStatus: RealtimeConnectionStatus;
+  previewInfo?: StaffPreviewBannerInfo;
   theme: 'dark' | 'light';
   children: React.ReactNode;
 }
@@ -64,34 +79,28 @@ export const StaffPortalLayout: React.FC<StaffPortalLayoutProps> = ({
   activeSection,
   onSelectSection,
   onSignOut,
+  sidebarMode,
+  onChangeSidebarMode,
   unreadConversationsCount,
   openTicketsCount,
   realtimeStatus,
+  previewInfo,
   theme,
   children,
 }) => {
   const isLight = theme === 'light';
-  const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(STAFF_CONFIG.sidebarStorageKey) === 'true';
-    } catch {
-      return false;
-    }
-  });
+  const [isHovered, setIsHovered] = useState(false);
+  const [sidebarMenuOpen, setSidebarMenuOpen] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
 
-  const toggleDesktopCollapse = () => {
-    setIsCollapsed((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem(STAFF_CONFIG.sidebarStorageKey, String(next));
-      } catch {
-        // Ignore storage error
-      }
-      return next;
-    });
-  };
+  const isDesktopCollapsed =
+    sidebarMode === 'collapsed' ||
+    (sidebarMode === 'hover' && !isHovered && !sidebarMenuOpen);
+
+  const { tooltip, showTooltip, hideTooltip } = useCollapsedSidebarTooltip(
+    sidebarMode === 'collapsed' && !sidebarMenuOpen
+  );
 
   const handleSignOutClick = async () => {
     if (isSigningOut) return;
@@ -125,7 +134,8 @@ export const StaffPortalLayout: React.FC<StaffPortalLayoutProps> = ({
     { id: 'availability', label: 'Availability', icon: Radio },
   ];
 
-  const availMeta = AVAILABILITY_STYLE[staff.availability] || AVAILABILITY_STYLE.OFFLINE;
+  const availMeta =
+    AVAILABILITY_STYLE[staff.availability] || AVAILABILITY_STYLE.OFFLINE;
 
   const sectionTitleMap: Record<StaffNavSection, string> = {
     overview: 'Overview',
@@ -135,50 +145,40 @@ export const StaffPortalLayout: React.FC<StaffPortalLayoutProps> = ({
     settings: 'Settings',
   };
 
-  const renderNavContent = (collapsed: boolean, onItemClick?: () => void) => (
+  const renderNavContent = (
+    collapsed: boolean,
+    isMobile: boolean,
+    onItemClick?: () => void
+  ) => (
     <div className="flex flex-col h-full justify-between min-h-0">
       {/* Top: Brand + Identity + Primary Nav */}
-      <div className="space-y-4 min-h-0 overflow-y-auto overflow-x-hidden pr-0.5">
+      <div className="space-y-4 min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-0.5">
         {/* Aureus Staff Identity Header */}
         <div
           className={`flex items-center ${
-            collapsed ? 'justify-center' : 'justify-between'
-          } gap-2 px-1`}
+            collapsed ? 'justify-center' : 'justify-start'
+          } gap-2.5 px-1`}
         >
+          <div
+            title={collapsed ? 'AUREUS STAFF' : undefined}
+            onMouseEnter={(e) =>
+              collapsed && showTooltip('AUREUS STAFF Desk', e.currentTarget)
+            }
+            onMouseLeave={hideTooltip}
+            className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center shrink-0"
+          >
+            <ShieldCheck className="w-4 h-4 text-emerald-500" />
+          </div>
           {!collapsed && (
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center shrink-0">
-                <ShieldCheck className="w-4 h-4 text-emerald-500" />
+            <div className="min-w-0">
+              <div className="text-xs font-bold tracking-wider uppercase truncate">
+                AUREUS STAFF
               </div>
-              <div className="min-w-0">
-                <div className="text-xs font-bold tracking-wider uppercase truncate">
-                  AUREUS STAFF
-                </div>
-                <div className="text-[10px] font-mono text-neutral-500 truncate">
-                  Private Wealth Desk
-                </div>
+              <div className="text-[10px] font-mono text-neutral-500 truncate">
+                Private Wealth Desk
               </div>
             </div>
           )}
-
-          {/* Desktop Collapse/Expand Button */}
-          <button
-            type="button"
-            onClick={toggleDesktopCollapse}
-            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar to icons'}
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar to icons'}
-            className={`hidden md:inline-flex items-center justify-center w-8 h-8 rounded-lg border transition-colors cursor-pointer shrink-0 ${
-              isLight
-                ? 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
-                : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800'
-            }`}
-          >
-            {collapsed ? (
-              <PanelLeftOpen className="w-4 h-4 text-emerald-500" />
-            ) : (
-              <PanelLeftClose className="w-4 h-4" />
-            )}
-          </button>
         </div>
 
         {/* Authenticated Staff Profile Card */}
@@ -191,10 +191,16 @@ export const StaffPortalLayout: React.FC<StaffPortalLayoutProps> = ({
               : 'bg-neutral-900/70 border-neutral-800'
           }`}
           title={
-            collapsed
-              ? `${staff.name} · ${staff.availability}`
-              : undefined
+            collapsed ? `${staff.name} · ${staff.availability}` : undefined
           }
+          onMouseEnter={(e) =>
+            collapsed &&
+            showTooltip(
+              `${staff.name} · ${staff.availability}`,
+              e.currentTarget
+            )
+          }
+          onMouseLeave={hideTooltip}
         >
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="relative shrink-0">
@@ -246,8 +252,14 @@ export const StaffPortalLayout: React.FC<StaffPortalLayoutProps> = ({
                 key={item.id}
                 type="button"
                 title={collapsed ? item.label : undefined}
+                aria-label={item.label}
+                onMouseEnter={(e) =>
+                  collapsed && showTooltip(item.label, e.currentTarget)
+                }
+                onMouseLeave={hideTooltip}
                 onClick={() => {
                   onSelectSection(item.id);
+                  hideTooltip();
                   onItemClick?.();
                 }}
                 className={`w-full flex items-center ${
@@ -269,23 +281,27 @@ export const StaffPortalLayout: React.FC<StaffPortalLayoutProps> = ({
                     }`}
                   />
                   {!collapsed && (
-                    <span className="truncate whitespace-nowrap">{item.label}</span>
+                    <span className="truncate whitespace-nowrap">
+                      {item.label}
+                    </span>
                   )}
                 </div>
 
-                {!collapsed && item.badge !== undefined && item.badge > 0 && (
-                  <span
-                    className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold tabular-nums shrink-0 ${
-                      item.id === 'conversations'
-                        ? 'bg-emerald-500 text-neutral-950'
-                        : isLight
-                        ? 'bg-slate-200 text-slate-700'
-                        : 'bg-neutral-800 text-neutral-300'
-                    }`}
-                  >
-                    {item.badge}
-                  </span>
-                )}
+                {!collapsed &&
+                  item.badge !== undefined &&
+                  item.badge > 0 && (
+                    <span
+                      className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold tabular-nums shrink-0 ${
+                        item.id === 'conversations'
+                          ? 'bg-emerald-500 text-neutral-950'
+                          : isLight
+                          ? 'bg-slate-200 text-slate-700'
+                          : 'bg-neutral-800 text-neutral-300'
+                      }`}
+                    >
+                      {item.badge}
+                    </span>
+                  )}
 
                 {collapsed && item.badge !== undefined && item.badge > 0 && (
                   <span className="absolute top-1.5 right-2 w-2 h-2 rounded-full bg-emerald-500" />
@@ -296,9 +312,9 @@ export const StaffPortalLayout: React.FC<StaffPortalLayoutProps> = ({
         </nav>
       </div>
 
-      {/* Bottom Navigation: Settings | Sign Out */}
+      {/* Bottom Navigation: Settings | Sign Out | Sidebar Display Mode */}
       <div
-        className={`pt-3 mt-3 border-t space-y-1.5 shrink-0 ${
+        className={`pt-3 mt-3 border-t space-y-1.5 shrink-0 relative ${
           isLight ? 'border-slate-200' : 'border-neutral-800/80'
         }`}
       >
@@ -326,8 +342,14 @@ export const StaffPortalLayout: React.FC<StaffPortalLayoutProps> = ({
         <button
           type="button"
           title={collapsed ? 'Settings' : undefined}
+          aria-label="Settings"
+          onMouseEnter={(e) =>
+            collapsed && showTooltip('Settings', e.currentTarget)
+          }
+          onMouseLeave={hideTooltip}
           onClick={() => {
             onSelectSection('settings');
+            hideTooltip();
             onItemClick?.();
           }}
           className={`w-full flex items-center ${
@@ -344,7 +366,9 @@ export const StaffPortalLayout: React.FC<StaffPortalLayoutProps> = ({
         >
           <Settings
             className={`w-4 h-4 shrink-0 ${
-              activeSection === 'settings' ? 'text-emerald-500' : 'text-neutral-400'
+              activeSection === 'settings'
+                ? 'text-emerald-500'
+                : 'text-neutral-400'
             }`}
           />
           {!collapsed && <span className="whitespace-nowrap">Settings</span>}
@@ -353,7 +377,12 @@ export const StaffPortalLayout: React.FC<StaffPortalLayoutProps> = ({
         <button
           type="button"
           title={collapsed ? 'Sign Out' : undefined}
+          aria-label="Sign Out"
           disabled={isSigningOut}
+          onMouseEnter={(e) =>
+            collapsed && showTooltip('Sign Out', e.currentTarget)
+          }
+          onMouseLeave={hideTooltip}
           onClick={handleSignOutClick}
           className={`w-full flex items-center ${
             collapsed ? 'justify-center px-0' : 'justify-start px-3'
@@ -374,6 +403,22 @@ export const StaffPortalLayout: React.FC<StaffPortalLayoutProps> = ({
             </span>
           )}
         </button>
+
+        {!isMobile && (
+          <SidebarDisplayControl
+            mode={sidebarMode}
+            onChangeMode={(next) => {
+              onChangeSidebarMode(next);
+              hideTooltip();
+            }}
+            collapsed={collapsed}
+            isLight={isLight}
+            isOpen={sidebarMenuOpen}
+            onSetOpen={setSidebarMenuOpen}
+            onShowTooltip={showTooltip}
+            onHideTooltip={hideTooltip}
+          />
+        )}
       </div>
     </div>
   );
@@ -388,16 +433,25 @@ export const StaffPortalLayout: React.FC<StaffPortalLayoutProps> = ({
     >
       {/* Desktop Sidebar */}
       <aside
-        className={`hidden md:flex flex-col shrink-0 border-r h-full min-h-0 py-3.5 transition-[width,padding] duration-200 ease-out ${
-          isCollapsed ? 'w-[72px] px-2.5' : 'w-60 px-3.5'
+        onMouseEnter={() => {
+          if (sidebarMode === 'hover') setIsHovered(true);
+        }}
+        onMouseLeave={() => {
+          if (sidebarMode === 'hover') setIsHovered(false);
+          hideTooltip();
+        }}
+        className={`hidden md:flex flex-col shrink-0 border-r h-full min-h-0 py-3.5 transition-[width,padding] duration-200 ease-out relative z-20 ${
+          isDesktopCollapsed ? 'w-[72px] px-2.5' : 'w-60 px-3.5'
         } ${
           isLight
             ? 'bg-white border-slate-200'
             : 'bg-neutral-950 border-neutral-800/80'
         }`}
       >
-        {renderNavContent(isCollapsed)}
+        {renderNavContent(isDesktopCollapsed, false)}
       </aside>
+
+      <CollapsedSidebarTooltip tooltip={tooltip} isLight={isLight} />
 
       {/* Mobile Header Bar (<768px) */}
       <header
@@ -456,7 +510,7 @@ export const StaffPortalLayout: React.FC<StaffPortalLayoutProps> = ({
         </div>
       </header>
 
-      {/* Mobile Slide-Out Drawer */}
+      {/* Mobile Slide-Out Drawer (click-driven, no hover dependency) */}
       {mobileDrawerOpen && (
         <div className="md:hidden fixed inset-0 z-50 flex">
           <div
@@ -486,7 +540,7 @@ export const StaffPortalLayout: React.FC<StaffPortalLayoutProps> = ({
               </button>
             </div>
             <div className="flex-1 min-h-0">
-              {renderNavContent(false, () => setMobileDrawerOpen(false))}
+              {renderNavContent(false, true, () => setMobileDrawerOpen(false))}
             </div>
           </aside>
         </div>
@@ -494,6 +548,50 @@ export const StaffPortalLayout: React.FC<StaffPortalLayoutProps> = ({
 
       {/* Main Content Viewport */}
       <main className="flex-1 min-w-0 min-h-0 h-full flex flex-col overflow-hidden">
+        {previewInfo?.active && (
+          <div
+            role="status"
+            className={`shrink-0 px-3 sm:px-4 py-2 border-b text-[11px] flex flex-wrap items-center justify-between gap-2 ${
+              isLight
+                ? 'bg-amber-50 border-amber-200 text-amber-900'
+                : 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+            }`}
+          >
+            <div className="min-w-0 flex-1">
+              <span className="font-mono font-bold uppercase tracking-wider text-amber-500 mr-2">
+                Preview Mode
+              </span>
+              <span>
+                {!previewInfo.isAuthenticated
+                  ? 'Unauthenticated dev preview (`mockData.ts`). Sign in and backend mutations require the live Express API.'
+                  : `Dev fallback active for ${previewInfo.sources.join(', ')} while backend endpoint is unavailable. Live endpoints stay active.`}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={previewInfo.onRetryLive}
+                className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-neutral-950 font-semibold text-[11px] cursor-pointer"
+              >
+                Retry Live API
+              </button>
+              {!previewInfo.isAuthenticated && previewInfo.onReturnToSignIn && (
+                <button
+                  type="button"
+                  onClick={previewInfo.onReturnToSignIn}
+                  className={`px-2.5 py-1 rounded-lg border font-medium text-[11px] cursor-pointer ${
+                    isLight
+                      ? 'bg-white border-amber-300 text-amber-900 hover:bg-amber-100'
+                      : 'bg-neutral-900 border-amber-500/40 text-amber-200 hover:bg-neutral-800'
+                  }`}
+                >
+                  Live Sign In
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         {children}
       </main>
     </div>

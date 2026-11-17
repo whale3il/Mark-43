@@ -42,9 +42,52 @@ function staffPortalRoutingPlugin(): Plugin {
   };
 }
 
+function adminPortalRoutingPlugin(): Plugin {
+  const rewriteAdminUrl = (
+    req: { url?: string; headers?: Record<string, string | string[] | undefined> },
+    next: () => void
+  ) => {
+    const rawUrl = req.url || '';
+    const pathname = rawUrl.split('?')[0];
+    const acceptsHtml =
+      typeof req.headers?.accept === 'string'
+        ? req.headers.accept.includes('text/html') || req.headers.accept.includes('*/*')
+        : true;
+
+    const isAdminPath = pathname === '/admin' || pathname.startsWith('/admin/');
+    const isAssetOrModule =
+      pathname.startsWith('/admin-portal/') ||
+      pathname.includes('.') ||
+      pathname.startsWith('/@') ||
+      pathname.startsWith('/api/');
+
+    if (isAdminPath && !isAssetOrModule && acceptsHtml) {
+      const queryIndex = rawUrl.indexOf('?');
+      const query = queryIndex >= 0 ? rawUrl.slice(queryIndex) : '';
+      req.url = `/admin.html${query}`;
+    }
+    next();
+  };
+
+  return {
+    name: 'aureus-admin-portal-routing',
+    configureServer(server) {
+      server.middlewares.use((req, _res, next) => rewriteAdminUrl(req, next));
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use((req, _res, next) => rewriteAdminUrl(req, next));
+    },
+  };
+}
+
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss(), staffPortalRoutingPlugin()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      staffPortalRoutingPlugin(),
+      adminPortalRoutingPlugin(),
+    ],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
@@ -55,6 +98,7 @@ export default defineConfig(() => {
         input: {
           main: path.resolve(__dirname, 'index.html'),
           staff: path.resolve(__dirname, 'staff.html'),
+          admin: path.resolve(__dirname, 'admin.html'),
         },
       },
     },

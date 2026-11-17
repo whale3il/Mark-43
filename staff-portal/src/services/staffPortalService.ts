@@ -15,8 +15,18 @@ import {
   TicketStatus,
   TicketWhisperNote,
 } from '../types/staff.types';
-import { staffApiRequest } from './staffApiClient';
+import { staffApiRequest, isDevMockFallbackEligible } from './staffApiClient';
 import { normalizeAvailability } from './staffAuthService';
+import {
+  INITIAL_CANNED_RESPONSES,
+  INITIAL_CONVERSATIONS,
+  INITIAL_TICKETS,
+  STAFF_PORTAL_NOTIFICATION_PREFERENCES,
+  STAFF_PORTAL_PREVIEW_PROFILE,
+  STAFF_PORTAL_RECENT_ACTIVITY,
+  STAFF_PORTAL_TICKET_EXTENSIONS,
+  SUPPORT_CUSTOMERS,
+} from '@/src/data/mockData';
 
 function normalizeMessage(raw: any, fallbackConvId: string): StaffChatMessage {
   const reactions: MessageReaction[] = Array.isArray(raw?.reactions)
@@ -160,18 +170,62 @@ function normalizeTicket(raw: any): StaffTicket {
 export const staffPortalService = {
   /**
    * Fetches scoped overview metrics & recent activity.
+   * Falls back to mockData.ts only in dev mode when backend is unavailable/unimplemented.
    */
-  async getOverview(): Promise<StaffApiResult<StaffOverviewSummary>> {
+  async getOverview(
+    scopedStaffId?: string
+  ): Promise<StaffApiResult<StaffOverviewSummary>> {
     const res = await staffApiRequest<StaffOverviewSummary>(
       STAFF_CONFIG.endpoints.staff.overview
     );
-    return res;
+
+    if (res.success && res.data) {
+      return { ...res, isMockFallback: false };
+    }
+
+    if (isDevMockFallbackEligible(res.error)) {
+      const targetStaffId = scopedStaffId || STAFF_PORTAL_PREVIEW_PROFILE.id;
+      const scopedConvs = INITIAL_CONVERSATIONS.filter(
+        (c) => c.agent.id === targetStaffId
+      );
+      const scopedTickets = INITIAL_TICKETS.filter(
+        (t) => t.assignedAgentId === targetStaffId
+      );
+      const resolvedCount = scopedTickets.filter(
+        (t) => t.status === 'Resolved'
+      ).length;
+
+      return {
+        success: true,
+        isMockFallback: true,
+        fallbackReason: res.error?.message,
+        data: {
+          activeConversations: scopedConvs.filter((c) => c.status === 'active')
+            .length,
+          pendingConversations: scopedConvs.filter((c) => c.status === 'pending')
+            .length,
+          unreadMessages: scopedConvs.reduce(
+            (sum, c) => sum + (c.unreadCount || 0),
+            0
+          ),
+          maxChats: STAFF_PORTAL_PREVIEW_PROFILE.maxChats,
+          assignedTickets: scopedTickets.length,
+          openTickets: scopedTickets.length - resolvedCount,
+          resolvedTickets: resolvedCount,
+          availability: STAFF_PORTAL_PREVIEW_PROFILE.availability,
+          recentActivity: STAFF_PORTAL_RECENT_ACTIVITY,
+        },
+      };
+    }
+
+    return { success: false, error: res.error };
   },
 
   /**
    * Fetches conversations strictly scoped to authenticated staff member (`requireStaff`).
+   * Falls back to mockData.ts only in dev mode when backend is unavailable/unimplemented.
    */
-  async listScopedConversations(): Promise<
+  async listScopedConversations(scopedStaffId?: string): Promise<
     StaffApiResult<{
       conversations: StaffConversation[];
       customers: Record<string, CustomerProfile>;
@@ -193,9 +247,33 @@ export const staffPortalService = {
           : {};
       return {
         success: true,
+        isMockFallback: false,
         data: {
           conversations: list.map(normalizeConversation),
           customers,
+        },
+      };
+    }
+
+    if (isDevMockFallbackEligible(res.error)) {
+      const targetStaffId = scopedStaffId || STAFF_PORTAL_PREVIEW_PROFILE.id;
+      const scopedConvs = INITIAL_CONVERSATIONS.filter(
+        (c) => c.agent.id === targetStaffId
+      ).map((c) =>
+        normalizeConversation({
+          ...c,
+          assignedStaffId: c.agent.id,
+          customerOnline: c.id === 'conv-1',
+        })
+      );
+
+      return {
+        success: true,
+        isMockFallback: true,
+        fallbackReason: res.error?.message,
+        data: {
+          conversations: scopedConvs,
+          customers: SUPPORT_CUSTOMERS,
         },
       };
     }
@@ -410,17 +488,44 @@ export const staffPortalService = {
 
   /**
    * Fetches tickets strictly assigned to authenticated staff member.
+   * Falls back to mockData.ts only in dev mode when backend is unavailable/unimplemented.
    */
-  async listScopedTickets(): Promise<StaffApiResult<StaffTicket[]>> {
+  async listScopedTickets(
+    scopedStaffId?: string
+  ): Promise<StaffApiResult<StaffTicket[]>> {
     const res = await staffApiRequest<any>(STAFF_CONFIG.endpoints.staff.tickets);
-    if (!res.success || !res.data) {
-      return { success: false, error: res.error };
+    if (res.success && res.data) {
+      const list = Array.isArray(res.data) ? res.data : res.data.tickets || [];
+      return {
+        success: true,
+        isMockFallback: false,
+        data: list.map(normalizeTicket),
+      };
     }
-    const list = Array.isArray(res.data) ? res.data : res.data.tickets || [];
-    return {
-      success: true,
-      data: list.map(normalizeTicket),
-    };
+
+    if (isDevMockFallbackEligible(res.error)) {
+      const targetStaffId = scopedStaffId || STAFF_PORTAL_PREVIEW_PROFILE.id;
+      const scopedTickets = INITIAL_TICKETS.filter(
+        (t) => t.assignedAgentId === targetStaffId
+      ).map((t) => {
+        const ext = STAFF_PORTAL_TICKET_EXTENSIONS[t.id];
+        return normalizeTicket({
+          ...t,
+          investigationNotes: ext?.investigationNotes,
+          resolution: ext?.resolution,
+          whisperNotes: ext?.whisperNotes || [],
+        });
+      });
+
+      return {
+        success: true,
+        isMockFallback: true,
+        fallbackReason: res.error?.message,
+        data: scopedTickets,
+      };
+    }
+
+    return { success: false, error: res.error };
   },
 
   /**
@@ -491,23 +596,62 @@ export const staffPortalService = {
 
   /**
    * Fetches approved canned responses for "/" shortcuts in composer.
+   * Falls back to mockData.ts only in dev mode when backend is unavailable/unimplemented.
    */
   async listCannedResponses(): Promise<StaffApiResult<CannedResponse[]>> {
     const res = await staffApiRequest<any>(
       STAFF_CONFIG.endpoints.sharedSupport.cannedResponses
     );
-    if (!res.success || !res.data) {
-      return { success: false, error: res.error };
+    if (res.success && res.data) {
+      const items = Array.isArray(res.data) ? res.data : res.data.templates || [];
+      return {
+        success: true,
+        isMockFallback: false,
+        data: items,
+      };
     }
-    const items = Array.isArray(res.data) ? res.data : res.data.templates || [];
-    return {
-      success: true,
-      data: items,
-    };
+
+    if (isDevMockFallbackEligible(res.error)) {
+      return {
+        success: true,
+        isMockFallback: true,
+        fallbackReason: res.error?.message,
+        data: INITIAL_CANNED_RESPONSES,
+      };
+    }
+
+    return { success: false, error: res.error };
+  },
+
+  /**
+   * Fetches notification preferences for staff settings page.
+   * Falls back to mockData.ts defaults only in dev mode when backend is unavailable/unimplemented.
+   */
+  async getNotificationPreferences(): Promise<
+    StaffApiResult<StaffNotificationPreferences>
+  > {
+    const res = await staffApiRequest<StaffNotificationPreferences>(
+      STAFF_CONFIG.endpoints.staff.notifications
+    );
+    if (res.success && res.data) {
+      return { ...res, isMockFallback: false };
+    }
+
+    if (isDevMockFallbackEligible(res.error)) {
+      return {
+        success: true,
+        isMockFallback: true,
+        fallbackReason: res.error?.message,
+        data: STAFF_PORTAL_NOTIFICATION_PREFERENCES,
+      };
+    }
+
+    return { success: false, error: res.error };
   },
 
   /**
    * Saves notification preferences for staff settings page.
+   * Never fakes backend persistence when endpoint fails or is unavailable.
    */
   async updateNotificationPreferences(
     prefs: StaffNotificationPreferences

@@ -1,5 +1,18 @@
 import { STAFF_CONFIG } from '../config/staffConfig';
-import { StaffApiResult } from '../types/staff.types';
+import { StaffApiError, StaffApiResult } from '../types/staff.types';
+
+/**
+ * Only returns true during Vite development (`import.meta.env.DEV`) when the backend
+ * endpoint is unreachable or not yet implemented. Never masks 401/403/400/422 errors
+ * or runs in production builds.
+ */
+export function isDevMockFallbackEligible(error?: StaffApiError): boolean {
+  if (typeof import.meta === 'undefined' || !import.meta.env?.DEV) {
+    return false;
+  }
+  if (!error) return false;
+  return Boolean(error.unimplemented || error.code === 'NETWORK_ERROR');
+}
 
 type UnauthorizedListener = (reason?: string) => void;
 const unauthorizedListeners = new Set<UnauthorizedListener>();
@@ -86,7 +99,12 @@ export async function staffApiRequest<T = unknown>(
     if (!response.ok) {
       const isHtmlFallback = !isJson && (response.status === 404 || response.status === 405);
       const unimplemented =
-        response.status === 404 || response.status === 501 || isHtmlFallback;
+        response.status === 404 ||
+        response.status === 501 ||
+        response.status === 502 ||
+        response.status === 503 ||
+        response.status === 504 ||
+        isHtmlFallback;
 
       return {
         success: false,

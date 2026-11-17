@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Aureus Admin Portal — Executive Operations Console</title>
+    <meta
+      name="description"
+      content="Standalone Aureus Admin Portal for executive operations: staff management, read-only support supervision, ticket oversight, and AI operational intelligence."
+    />
+    <meta property="og:title" content="Aureus Admin Portal — Executive Operations Console" />
+    <meta
+      property="og:description"
+      content="Dedicated administrative command workspace for Aureus Private Banking staff directory, support monitoring, and escalation governance."
+    />
+    <meta property="og:type" content="website" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem('aureus_theme');
+          var root = document.documentElement;
+          if (saved === 'light') {
+            root.classList.remove('dark');
+            root.classList.add('light');
+          } else {
+            root.classList.remove('light');
+            root.classList.add('dark');
+          }
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body class="bg-neutral-950 text-neutral-100 antialiased selection:bg-emerald-500/20 selection:text-emerald-300">
+    <div id="admin-root"></div>
+    <script type="module" src="/admin-portal/src/main.tsx"></script>
+  </body>
+</html>

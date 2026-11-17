@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   User,
   Sun,
@@ -8,16 +8,20 @@ import {
   CheckCircle2,
   AlertCircle,
   Loader2,
+  PanelLeft,
 } from 'lucide-react';
 import {
   StaffMemberProfile,
   StaffNotificationPreferences,
+  StaffSidebarMode,
 } from '../types/staff.types';
 
 interface StaffSettingsPageProps {
   staff: StaffMemberProfile;
   theme: 'dark' | 'light';
   onSetTheme: (theme: 'dark' | 'light') => void;
+  sidebarMode: StaffSidebarMode;
+  onChangeSidebarMode: (mode: StaffSidebarMode) => void;
   notificationPrefs: StaffNotificationPreferences;
   onSaveNotificationPrefs: (
     next: StaffNotificationPreferences
@@ -28,6 +32,8 @@ export const StaffSettingsPage: React.FC<StaffSettingsPageProps> = ({
   staff,
   theme,
   onSetTheme,
+  sidebarMode,
+  onChangeSidebarMode,
   notificationPrefs,
   onSaveNotificationPrefs,
 }) => {
@@ -37,6 +43,10 @@ export const StaffSettingsPage: React.FC<StaffSettingsPageProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraftPrefs(notificationPrefs);
+  }, [notificationPrefs]);
 
   const togglePref = (key: keyof StaffNotificationPreferences) => {
     setDraftPrefs((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -185,6 +195,52 @@ export const StaffSettingsPage: React.FC<StaffSettingsPageProps> = ({
               </div>
             </div>
           </button>
+        </div>
+
+        <div className="pt-2 border-t border-neutral-800/30 space-y-2.5">
+          <div className="flex items-center gap-2 text-xs font-semibold">
+            <PanelLeft className="w-3.5 h-3.5 text-emerald-500" />
+            <span>Sidebar Display Mode</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            {(
+              [
+                {
+                  id: 'expanded',
+                  label: 'Expanded',
+                  desc: 'Always show labels',
+                },
+                {
+                  id: 'collapsed',
+                  label: 'Collapsed',
+                  desc: 'Icons with tooltips',
+                },
+                {
+                  id: 'hover',
+                  label: 'Expand on Hover',
+                  desc: 'Auto-expand on hover',
+                },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => onChangeSidebarMode(opt.id)}
+                className={`p-3 rounded-xl border text-left transition-colors cursor-pointer ${
+                  sidebarMode === opt.id
+                    ? 'border-emerald-500 bg-emerald-500/10'
+                    : isLight
+                    ? 'border-slate-200 bg-slate-50 hover:bg-slate-100'
+                    : 'border-neutral-800 bg-neutral-950/60 hover:bg-neutral-800/40'
+                }`}
+              >
+                <div className="text-xs font-semibold">{opt.label}</div>
+                <div className="text-[11px] text-neutral-400 mt-0.5">
+                  {opt.desc}
+                </div>
+              </button>
+            ))}
+          </div>
         </div>
       </section>
 
