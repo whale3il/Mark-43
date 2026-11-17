@@ -27,8 +27,7 @@ import {
 import {
   SupportAgent,
   SupportConversation,
-  SupportTicket,
-  UserPortalRole
+  SupportTicket
 } from './types/support';
 import { Header } from './components/Header';
 import { Sidebar, NavTab } from './components/Sidebar';
@@ -54,17 +53,16 @@ import { SupportService } from './services/supportService';
 import { realtimeClient } from './services/realtimeClient';
 import { AuthUser } from './types/auth';
 import { CheckCircle2, Menu, X, Sun, Moon, LogOut } from 'lucide-react';
-import {supabase} from '../src/lib/supbase'
+import { supabase } from '../src/lib/supbase';
 
 export default function App() {
-  // Navigation & View Mode
+  // Customer navigation
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [isDesignMode, setIsDesignMode] = useState<boolean>(false);
   const [maskBalance, setMaskBalance] = useState<boolean>(false);
   const [currency, setCurrency] = useState<CurrencyCode>('USD');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Theme Management (Dark / Light Theme Switcher)
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('aureus_theme');
@@ -85,86 +83,89 @@ export default function App() {
     localStorage.setItem('aureus_theme', theme);
   }, [theme]);
 
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
   const toggleTheme = () => {
     const next = theme === 'dark' ? 'light' : 'dark';
     setTheme(next);
     showToast(`Switched to ${next === 'light' ? 'Executive Slate Light' : 'Obsidian Dark'} theme`);
   };
 
-  // Legacy portals removed; the customer application retains its own navigation.
-  const portalMode: UserPortalRole = 'CLIENT';
-
-  // Dedicated Support Unread Counter State
   const [supportUnreadCount, setSupportUnreadCount] = useState<number>(2);
-
-  // Support System State (ready for Express, Supabase & Ably backend)
   const [staffList, setStaffList] = useState<SupportAgent[]>(SUPPORT_STAFF_LIST);
   const [supportConversations, setSupportConversations] = useState<SupportConversation[]>(INITIAL_SUPPORT_CONVERSATIONS);
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>(INITIAL_TICKETS);
 
-  // Authentication & Session State (pure frontend client state)
+  // Existing Supabase authentication and session-restoration flow is preserved.
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
-
-const [authLoading, setAuthLoading] = useState(true);
-const [authError, setAuthError] = useState<string | null>(null);
-
- useEffect(() => {
-  let active = true;
-  async function restoreSession() {
-    try {
-      const { data, error } = await supabase.auth.getSession();
-      if (error) throw error;
-      if (!data.session) return;
-
-      const { data: verified, error: verifyError } = await supabase.auth.getUser();
-      if (verifyError || !verified.user) throw new Error("Unable to verify your session.");
-      if (!verified.user.email_confirmed_at) throw new Error("Please verify your email before continuing.");
-
-      // Only synchronize Google identities through the Google-specific endpoint.
-      // Password sessions use the existing /api/auth/me endpoint instead.
-      const isGoogle = verified.user.app_metadata?.provider === "google";
-      const token = data.session.access_token;
-      let user: AuthUser;
-      if (isGoogle) {
-        const response = await AuthService.syncGoogleUser(token);
-        if (!response.success || !response.data) {
-          throw new Error(typeof response.error === "string" ? response.error : response.error?.message || "Unable to synchronize your account.");
-        }
-        user = response.data;
-      } else {
-        const response = await fetch("/api/auth/me", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!response.ok) throw new Error("Unable to restore your account profile.");
-        const payload = await response.json();
-        if (!payload.success || !payload.data) throw new Error("Account profile not found.");
-        user = { ...payload.data, name: `${payload.data.firstName} ${payload.data.lastName}` };
-      }
-
-      if (!active) return;
-      localStorage.setItem("whales_token", token);
-      setCurrentUser(user);
-      setActiveTab("dashboard");
-      setIsDesignMode(false);
-      if (window.location.pathname === "/auth/callback") window.history.replaceState({}, "", "/");
-    } catch (err) {
-      console.error("Authentication error:", err);
-      if (active) {
-        localStorage.removeItem("whales_token");
-        setAuthError(err instanceof Error ? err.message : "Authentication failed.");
-      }
-    } finally {
-      if (active) setAuthLoading(false);
-    }
-  }
-  restoreSession();
-  return () => { active = false; };
-}, []);
-
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
 
-  // Core Data States (synchronized live with server-side Prisma / Supabase backend)
+  useEffect(() => {
+    let active = true;
+    async function restoreSession() {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
+        if (!data.session) return;
+
+        const { data: verified, error: verifyError } = await supabase.auth.getUser();
+        if (verifyError || !verified.user) throw new Error('Unable to verify your session.');
+        if (!verified.user.email_confirmed_at) throw new Error('Please verify your email before continuing.');
+
+        // Google sessions synchronize via the Google endpoint; password sessions via /api/auth/me.
+        const isGoogle = verified.user.app_metadata?.provider === 'google';
+        const token = data.session.access_token;
+        let user: AuthUser;
+
+        if (isGoogle) {
+          const response = await AuthService.syncGoogleUser(token);
+          if (!response.success || !response.data) {
+            throw new Error(
+              typeof response.error === 'string'
+                ? response.error
+                : response.error?.message || 'Unable to synchronize your account.'
+            );
+          }
+          user = response.data;
+        } else {
+          const response = await fetch('/api/auth/me', {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          if (!response.ok) throw new Error('Unable to restore your account profile.');
+          const payload = await response.json();
+          if (!payload.success || !payload.data) throw new Error('Account profile not found.');
+          user = { ...payload.data, name: `${payload.data.firstName} ${payload.data.lastName}` };
+        }
+
+        if (!active) return;
+        localStorage.setItem('whales_token', token);
+        setCurrentUser(user);
+        setActiveTab('dashboard');
+        setIsDesignMode(false);
+        if (window.location.pathname === '/auth/callback') {
+          window.history.replaceState({}, '', '/');
+        }
+      } catch (err) {
+        console.error('Authentication error:', err);
+        if (active) {
+          localStorage.removeItem('whales_token');
+          setAuthError(err instanceof Error ? err.message : 'Authentication failed.');
+        }
+      } finally {
+        if (active) setAuthLoading(false);
+      }
+    }
+    void restoreSession();
+    return () => { active = false; };
+  }, []);
+
   const [accounts, setAccounts] = useState<BankAccount[]>(INITIAL_ACCOUNTS);
   const [transactions, setTransactions] = useState<Transaction[]>(INITIAL_TRANSACTIONS);
   const [beneficiaries, setBeneficiaries] = useState<Beneficiary[]>(INITIAL_BENEFICIARIES);
@@ -176,22 +177,20 @@ const [authError, setAuthError] = useState<string | null>(null);
   const [statements] = useState(INITIAL_STATEMENTS);
   const [sessions, setSessions] = useState(INITIAL_SESSIONS);
 
-  // Modals & Inspect
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [showNewVaultModal, setShowNewVaultModal] = useState(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3500);
+  // Retains existing sign-out approach, including Supabase signOut and AuthService.logout.
+  const handleLogout = () => {
+    void supabase.auth.signOut();
+    void AuthService.logout();
+    localStorage.removeItem('whales_token');
+    setCurrentUser(null);
+    setAuthMode('login');
+    setMobileMenuOpen(false);
+    showToast('Session locked. Signed out successfully.');
   };
 
-  // Kept for existing Header/Sidebar prop compatibility.
-  const handleSetPortalMode = (_mode: UserPortalRole) => {
-    if (window.location.pathname !== '/') window.history.pushState(null, '', '/');
-  };
-
-  // Fetch initial data from server-side Prisma & Supabase backend and subscribe to realtime events
   useEffect(() => {
     const fetchServerData = async () => {
       try {
@@ -220,9 +219,10 @@ const [authError, setAuthError] = useState<string | null>(null);
       }
     };
 
-    fetchServerData();
+    // Only subscribe and load customer data when signed in.
+    if (!currentUser) return;
+    void fetchServerData();
 
-    // Subscribe to server-side Realtime SSE stream for zero-refresh instant updates
     const unsubscribe = realtimeClient.subscribe((eventType, payload) => {
       if (eventType === 'account:created') {
         setAccounts((prev) => {
@@ -271,12 +271,9 @@ const [authError, setAuthError] = useState<string | null>(null);
       }
     });
 
-    return () => {
-      unsubscribe();
-    };
-  }, []);
+    return () => { unsubscribe(); };
+  }, [currentUser?.id]);
 
-  // Server-authoritative wire transfer handler
   const handleExecuteTransfer = async (transfer: {
     sourceAccountId: string;
     beneficiaryId: string;
@@ -286,68 +283,61 @@ const [authError, setAuthError] = useState<string | null>(null);
   }) => {
     try {
       const res = await BankingService.executeTransfer(transfer);
-      // Deduct balance from source account
-      setAccounts((prev) =>
-        prev.map((acc) =>
-          acc.id === transfer.sourceAccountId
-            ? { ...acc, balance: acc.balance - transfer.amount, availableBalance: acc.availableBalance - transfer.amount }
-            : acc
-        )
-      );
       if (res.success && res.data) {
         setTransactions((prev) => [res.data!, ...prev.filter((t) => t.id !== res.data!.id)]);
+        // Balance is refreshed from authoritative server events, rather than deducted twice.
         showToast(`Disbursement of $${transfer.amount.toLocaleString()} transmitted via Fedwire.`);
       } else {
-        showToast(`Disbursement of $${transfer.amount.toLocaleString()} transmitted via Fedwire.`);
+        showToast('Transfer was not confirmed. Please check the transaction status.');
       }
-    } catch {
-      // Optimistic local update fallback
-      setAccounts((prev) =>
-        prev.map((acc) =>
-          acc.id === transfer.sourceAccountId
-            ? { ...acc, balance: acc.balance - transfer.amount, availableBalance: acc.availableBalance - transfer.amount }
-            : acc
-        )
-      );
-      showToast(`Disbursement of $${transfer.amount.toLocaleString()} transmitted via Fedwire.`);
+    } catch (err) {
+      console.error('Transfer failed:', err);
+      showToast('Transfer failed. Your displayed balance has not been changed.');
     }
   };
 
-
-  // Server-authoritative beneficiary management
   const handleAddBeneficiary = async (newBen: Omit<Beneficiary, 'id'>) => {
     try {
       const res = await BankingService.addBeneficiary(newBen);
       if (res.success && res.data) {
-        setBeneficiaries((prev) => [...prev, res.data!]);
+        setBeneficiaries((prev) => [...prev.filter((b) => b.id !== res.data!.id), res.data!]);
         showToast(`Added ${res.data.name} to verified counterparty directory.`);
+      } else {
+        showToast('Unable to add counterparty.');
       }
-    } catch {
-      const ben: Beneficiary = { ...newBen, id: `ben-${Date.now()}` };
-      setBeneficiaries((prev) => [ben, ...prev]);
-      showToast(`Added ${ben.name} to verified counterparty directory.`);
+    } catch (err) {
+      console.error('Add beneficiary failed:', err);
+      showToast('Unable to add counterparty.');
     }
   };
 
   const handleDeleteBeneficiary = async (id: string) => {
     try {
-      await BankingService.deleteBeneficiary(id);
+      const res = await BankingService.deleteBeneficiary(id);
+      if (!res.success) {
+        showToast('Unable to remove counterparty.');
+        return;
+      }
       setBeneficiaries((prev) => prev.filter((b) => b.id !== id));
       showToast('Counterparty removed.');
-    } catch {
-      setBeneficiaries((prev) => prev.filter((b) => b.id !== id));
-      showToast('Counterparty removed.');
+    } catch (err) {
+      console.error('Delete beneficiary failed:', err);
+      showToast('Unable to remove counterparty.');
     }
   };
 
-  // Server-authoritative card controls
   const handleUpdateCard = async (updatedCard: PaymentCard) => {
     try {
-      await BankingService.updateCard(updatedCard.id, updatedCard);
+      const res = await BankingService.updateCard(updatedCard.id, updatedCard);
+      if (!res.success) {
+        showToast('Unable to update card.');
+        return;
+      }
       setCards((prev) => prev.map((c) => (c.id === updatedCard.id ? updatedCard : c)));
       showToast(updatedCard.isFrozen ? `${updatedCard.tier} card is now temporarily frozen.` : `${updatedCard.tier} card settings updated.`);
-    } catch {
-      setCards((prev) => prev.map((c) => (c.id === updatedCard.id ? updatedCard : c)));
+    } catch (err) {
+      console.error('Update card failed:', err);
+      showToast('Unable to update card.');
     }
   };
 
@@ -355,34 +345,28 @@ const [authError, setAuthError] = useState<string | null>(null);
     try {
       const res = await BankingService.issueCard(newCard);
       if (res.success && res.data) {
-        setCards((prev) => [...prev, res.data!]);
+        setCards((prev) => [...prev.filter((c) => c.id !== res.data!.id), res.data!]);
         showToast(`New virtual card issued for ${res.data.nameOnCard}.`);
+      } else {
+        showToast('Unable to issue card.');
       }
-    } catch {
-      setCards((prev) => [...prev, newCard]);
-      showToast(`New virtual card issued for ${newCard.nameOnCard}.`);
+    } catch (err) {
+      console.error('Issue card failed:', err);
+      showToast('Unable to issue card.');
     }
   };
 
-  // Server-authoritative savings goal sweeps
   const handleDepositToGoal = async (goalId: string, amount: number) => {
     try {
       const res = await BankingService.depositToGoal(goalId, amount);
       if (res.success) {
         showToast(`$${amount.toLocaleString()} swept into goal reserve.`);
+      } else {
+        showToast('Goal deposit could not be confirmed.');
       }
-    } catch {
-      setAccounts((prev) =>
-        prev.map((acc) =>
-          acc.type === 'checking'
-            ? { ...acc, balance: acc.balance - amount, availableBalance: acc.availableBalance - amount }
-            : acc
-        )
-      );
-      setGoals((prev) =>
-        prev.map((g) => (g.id === goalId ? { ...g, currentAmount: g.currentAmount + amount } : g))
-      );
-      showToast(`$${amount.toLocaleString()} swept into goal reserve.`);
+    } catch (err) {
+      console.error('Goal deposit failed:', err);
+      showToast('Goal deposit failed.');
     }
   };
 
@@ -390,41 +374,45 @@ const [authError, setAuthError] = useState<string | null>(null);
     try {
       const res = await BankingService.createGoal(goal);
       if (res.success && res.data) {
-        setGoals((prev) => [...prev, res.data!]);
+        setGoals((prev) => [...prev.filter((g) => g.id !== res.data!.id), res.data!]);
         showToast(`Goal vault established: ${res.data.title}`);
+      } else {
+        showToast('Unable to create goal vault.');
       }
-    } catch {
-      setGoals((prev) => [...prev, goal]);
-      showToast(`Goal vault established: ${goal.title}`);
+    } catch (err) {
+      console.error('Create goal failed:', err);
+      showToast('Unable to create goal vault.');
     }
   };
 
-  // Server-authoritative bill payment
   const handlePayBill = async (billId: string) => {
     try {
       const res = await BankingService.payBill(billId);
       if (res.success) {
         showToast('Invoice settled.');
+      } else {
+        showToast('Invoice payment could not be confirmed.');
       }
-    } catch {
-      const targetBill = bills.find((b) => b.id === billId);
-      if (targetBill) {
-        setBills((prev) => prev.map((b) => (b.id === billId ? { ...b, status: 'paid', lastPaidDate: 'Today' } : b)));
-        showToast(`Invoice of $${targetBill.amount.toLocaleString()} settled for ${targetBill.billerName}.`);
-      }
+    } catch (err) {
+      console.error('Bill payment failed:', err);
+      showToast('Invoice payment failed.');
     }
   };
 
   const handleToggleAutopay = async (billId: string) => {
     const target = bills.find((b) => b.id === billId);
-    if (target) {
-      const newStatus = !target.autoPay;
-      try {
-        await BankingService.toggleAutopay(billId, newStatus);
-        setBills((prev) => prev.map((b) => (b.id === billId ? { ...b, autoPay: newStatus } : b)));
-      } catch {
-        setBills((prev) => prev.map((b) => (b.id === billId ? { ...b, autoPay: newStatus } : b)));
+    if (!target) return;
+    const newStatus = !target.autoPay;
+    try {
+      const res = await BankingService.toggleAutopay(billId, newStatus);
+      if (!res.success) {
+        showToast('Unable to update autopay.');
+        return;
       }
+      setBills((prev) => prev.map((b) => (b.id === billId ? { ...b, autoPay: newStatus } : b)));
+    } catch (err) {
+      console.error('Toggle autopay failed:', err);
+      showToast('Unable to update autopay.');
     }
   };
 
@@ -432,32 +420,32 @@ const [authError, setAuthError] = useState<string | null>(null);
     try {
       const res = await BankingService.addBill(bill);
       if (res.success && res.data) {
-        setBills((prev) => [...prev, res.data!]);
+        setBills((prev) => [...prev.filter((b) => b.id !== res.data!.id), res.data!]);
         showToast(`Scheduled invoice added for ${res.data.billerName}.`);
+      } else {
+        showToast('Unable to schedule invoice.');
       }
-    } catch {
-      setBills((prev) => [...prev, bill]);
-      showToast(`Scheduled invoice added for ${bill.billerName}.`);
+    } catch (err) {
+      console.error('Add bill failed:', err);
+      showToast('Unable to schedule invoice.');
     }
   };
 
-  // Server-authoritative session revocation
   const handleRevokeSession = async (sessionId: string) => {
     try {
-      await BankingService.revokeSession(sessionId);
+      const res = await BankingService.revokeSession(sessionId);
+      if (!res.success) {
+        showToast('Unable to revoke device session.');
+        return;
+      }
       setSessions((prev) => prev.filter((s) => s.id !== sessionId));
       showToast('Device session revoked immediately.');
-    } catch {
-      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
-      showToast('Device session revoked immediately.');
+    } catch (err) {
+      console.error('Session revocation failed:', err);
+      showToast('Unable to revoke device session.');
     }
   };
 
-  /**
-   * CRITICAL REQUIREMENT:
-   * Any account that uses US Dollars (USD) automatically provisions
-   * and links a unique wallet address for the user via the backend server.
-   */
   const handleCreateAccount = async (newAcc: BankAccount) => {
     try {
       const res = await BankingService.createAccount({
@@ -468,7 +456,6 @@ const [authError, setAuthError] = useState<string | null>(null);
         dailyTransferLimit: 100000,
         initialDeposit: newAcc.balance
       });
-
       if (res.success && res.data) {
         setAccounts((prev) => {
           if (prev.some((a) => a.id === res.data!.id)) return prev;
@@ -478,39 +465,47 @@ const [authError, setAuthError] = useState<string | null>(null);
         if (res.data.currency === 'USD' && res.data.walletAddress) {
           showToast(`Linked USD Wallet provisioned: ${res.data.walletAddress.slice(0, 10)}...`);
         }
+      } else {
+        showToast('Unable to create account.');
       }
-    } catch {
-      setAccounts((prev) => [...prev, newAcc]);
-      showToast(`Segregated vault "${newAcc.name}" provisioned.`);
+    } catch (err) {
+      console.error('Create account failed:', err);
+      showToast('Unable to create account.');
     }
   };
 
-  // Customer support ticket creation
   const handleCreateTicket = async (ticket: SupportTicket) => {
-    setSupportTickets((prev) => [ticket, ...prev]);
-    await SupportService.createTicket({
-      subject: ticket.subject,
-      category: ticket.category,
-      priority: ticket.priority,
-      description: ticket.description,
-      assignedAgent: ticket.assignedAgent,
-      assignedAgentId: ticket.assignedAgentId,
-      customerId: ticket.customerId,
-      customerName: ticket.customerName
-    });
-    showToast(`Support ticket ${ticket.id} logged with desk.`);
+    try {
+      const res = await SupportService.createTicket({
+        subject: ticket.subject,
+        category: ticket.category,
+        priority: ticket.priority,
+        description: ticket.description,
+        assignedAgent: ticket.assignedAgent,
+        assignedAgentId: ticket.assignedAgentId,
+        customerId: ticket.customerId,
+        customerName: ticket.customerName
+      });
+      if (res.success) {
+        setSupportTickets((prev) => [ticket, ...prev.filter((t) => t.id !== ticket.id)]);
+        showToast(`Support ticket ${ticket.id} logged with desk.`);
+      } else {
+        showToast('Unable to submit support ticket.');
+      }
+    } catch (err) {
+      console.error('Ticket creation failed:', err);
+      showToast('Unable to submit support ticket.');
+    }
   };
 
-  // Render Authentication Flow when not logged in
   if (authLoading) {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-neutral-950 text-neutral-100">
-      <p className="text-neutral-400">
-        Checking authentication session...
-      </p>
-    </div>
-  );
-}
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-neutral-950 text-neutral-100">
+        <p className="text-neutral-400">Checking authentication session...</p>
+      </div>
+    );
+  }
+
   if (!currentUser) {
     if (authMode === 'signup') {
       return (
@@ -548,51 +543,35 @@ const [authError, setAuthError] = useState<string | null>(null);
   const isSupportWorkspace = activeTab === 'support' && !isDesignMode;
 
   return (
-// <!-- <<<<<<< nexus -->
-    
+    <div className={`h-dvh flex flex-col overflow-hidden ${theme === 'light' ? 'bg-slate-50 text-slate-900' : 'bg-neutral-950 text-neutral-100'} font-sans antialiased selection:bg-emerald-500/20 selection:text-emerald-300 transition-colors duration-200`}>
+      {/* Customer Support gets the full viewport height without the header. */}
+      {!isSupportWorkspace && (
+        <Header
+          maskBalance={maskBalance}
+          setMaskBalance={setMaskBalance}
+          isDesignMode={isDesignMode}
+          setIsDesignMode={setIsDesignMode}
+          currency={currency}
+          setCurrency={setCurrency}
+          notifications={notifications}
+          setNotifications={setNotifications}
+          onOpenTransfer={() => {
+            setActiveTab('transfers');
+            if (isDesignMode) setIsDesignMode(false);
+          }}
+          theme={theme}
+          toggleTheme={toggleTheme}
+          onNavigateSupport={() => {
+            setActiveTab('support');
+            if (isDesignMode) setIsDesignMode(false);
+          }}
+          supportUnreadCount={supportUnreadCount}
+          user={currentUser}
+          onLogout={handleLogout}
+          onOpenProfile={() => setShowProfileModal(true)}
+        />
+      )}
 
-<div className={`h-dvh flex flex-col overflow-hidden ${theme === 'light' ? 'bg-slate-50 text-slate-900' : 'bg-neutral-950 text-neutral-100'} font-sans antialiased selection:bg-emerald-500/20 selection:text-emerald-300 transition-colors duration-200`}>
-  {/* Hide Header inside Support workspaces for full viewport height */}
-  {!isSupportWorkspace && (
-    <Header
-      portalMode={portalMode}
-      setPortalMode={handleSetPortalMode}
-      maskBalance={maskBalance}
-      setMaskBalance={setMaskBalance}
-      isDesignMode={isDesignMode}
-      setIsDesignMode={setIsDesignMode}
-      currency={currency}
-      setCurrency={setCurrency}
-      notifications={notifications}
-      setNotifications={setNotifications}
-      onOpenTransfer={() => {
-        handleSetPortalMode('CLIENT');
-        setActiveTab('transfers');
-        if (isDesignMode) setIsDesignMode(false);
-      }}
-      theme={theme}
-      toggleTheme={toggleTheme}
-      onNavigateSupport={() => {
-        handleSetPortalMode('CLIENT');
-        setActiveTab('support');
-        if (isDesignMode) setIsDesignMode(false);
-      }}
-      supportUnreadCount={supportUnreadCount}
-      user={currentUser}
-      onLogout={() => {
-        void supabase.auth.signOut();
-        void AuthService.logout();
-        setCurrentUser(null);
-        setAuthMode('login');
-        showToast('Session locked. Signed out successfully.');
-      }}
-      onOpenProfile={() => setShowProfileModal(true)}
-    />
-  )}
-
-{/* <!-- >>>>>>> safe-checkpoint --> */}
-
-      {/* Global Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl bg-neutral-900 border border-emerald-500/40 text-neutral-100 text-xs shadow-2xl backdrop-blur-md animate-in slide-in-from-bottom-5">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -600,32 +579,21 @@ const [authError, setAuthError] = useState<string | null>(null);
         </div>
       )}
 
-      {/* Main Workspace Frame — Main customer workspace sidebar */}
       <div className="flex-1 flex w-full min-h-0 overflow-hidden">
         <Sidebar
-          portalMode={portalMode}
-          onSelectPortal={handleSetPortalMode}
           activeTab={activeTab}
           setActiveTab={setActiveTab}
           isDesignMode={isDesignMode}
           setIsDesignMode={setIsDesignMode}
           onOpenAdvisorModal={() => {
-            handleSetPortalMode('CLIENT');
             setActiveTab('support');
             if (isDesignMode) setIsDesignMode(false);
           }}
           supportUnreadCount={supportUnreadCount}
-          onLogout={() => {
-            void supabase.auth.signOut();
-           void AuthService.logout();
-            setCurrentUser(null);
-            setAuthMode('login');
-            showToast('Session locked. Signed out successfully.');
-          }}
+          onLogout={handleLogout}
           theme={theme}
         />
 
-        {/* Viewport Content Area — Dedicated full-height customer support shell; unchanged elsewhere */}
         <main
           className={`flex-1 min-w-0 min-h-0 h-full max-w-full ${
             isSupportWorkspace
@@ -633,15 +601,10 @@ const [authError, setAuthError] = useState<string | null>(null);
               : 'p-4 md:p-8 overflow-y-auto'
           }`}
         >
-          {/* Mobile Tab & Portal Nav Selector */}
           <div className={`md:hidden ${isSupportWorkspace ? 'mb-1.5 pb-1.5' : 'mb-2.5 pb-2'} flex items-center justify-between border-b shrink-0 ${theme === 'light' ? 'border-slate-200' : 'border-neutral-800'}`}>
             <div className="flex items-center gap-2">
               <span className={`text-xs font-semibold capitalize ${theme === 'light' ? 'text-slate-800' : 'text-neutral-300'}`}>
-                {isDesignMode
-                  ? 'Design System Specs'
-                  : activeTab === 'support'
-                  ? 'Customer Support'
-                  : activeTab}
+                {isDesignMode ? 'Design System Specs' : activeTab === 'support' ? 'Customer Support' : activeTab}
               </span>
               {activeTab === 'support' && supportUnreadCount > 0 && (
                 <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-emerald-500 text-neutral-950 font-bold">
@@ -658,10 +621,10 @@ const [authError, setAuthError] = useState<string | null>(null);
               >
                 {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-sky-500" />}
               </button>
-
               <button
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                 className={`p-1.5 rounded-lg border ${theme === 'light' ? 'bg-white border-slate-200 text-slate-600' : 'bg-neutral-900 border-neutral-800 text-neutral-400'}`}
+                title="Open navigation"
               >
                 {mobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
               </button>
@@ -680,12 +643,11 @@ const [authError, setAuthError] = useState<string | null>(null);
                 { id: 'bills', label: 'Bills' },
                 { id: 'statements', label: 'Statements' },
                 { id: 'security', label: 'Security' },
-                { id: 'support', label: `Support (${supportUnreadCount})` },
+                { id: 'support', label: `Support (${supportUnreadCount})` }
               ].map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => {
-                    handleSetPortalMode('CLIENT');
                     setActiveTab(tab.id as NavTab);
                     setIsDesignMode(false);
                     setMobileMenuOpen(false);
@@ -694,8 +656,8 @@ const [authError, setAuthError] = useState<string | null>(null);
                     activeTab === tab.id && !isDesignMode
                       ? 'bg-emerald-500/10 text-emerald-400 font-semibold'
                       : theme === 'light'
-                      ? 'text-slate-600 hover:bg-slate-100'
-                      : 'text-neutral-400 hover:bg-neutral-800/50'
+                        ? 'text-slate-600 hover:bg-slate-100'
+                        : 'text-neutral-400 hover:bg-neutral-800/50'
                   }`}
                 >
                   <span>{tab.label}</span>
@@ -706,7 +668,6 @@ const [authError, setAuthError] = useState<string | null>(null);
               ))}
               <button
                 onClick={() => {
-                  handleSetPortalMode('CLIENT');
                   setIsDesignMode(true);
                   setMobileMenuOpen(false);
                 }}
@@ -715,14 +676,7 @@ const [authError, setAuthError] = useState<string | null>(null);
                 Design System & Spec Sheet
               </button>
               <button
-                onClick={() => {
-                  void supabase.auth.signOut();
-           void AuthService.logout();
-                  setCurrentUser(null);
-                  setAuthMode('login');
-                  setMobileMenuOpen(false);
-                  showToast('Session locked. Signed out successfully.');
-                }}
+                onClick={handleLogout}
                 className="col-span-2 p-2 rounded-lg text-center bg-red-500/10 hover:bg-red-500/20 text-red-400 font-medium border border-red-500/25 flex items-center justify-center gap-2"
               >
                 <LogOut className="w-3.5 h-3.5" />
@@ -731,7 +685,6 @@ const [authError, setAuthError] = useState<string | null>(null);
             </div>
           )}
 
-          {/* Customer view rendering */}
           {isDesignMode ? (
             <DesignSpecView onReturnToApp={() => setIsDesignMode(false)} />
           ) : (
@@ -849,7 +802,6 @@ const [authError, setAuthError] = useState<string | null>(null);
         </main>
       </div>
 
-      {/* Transaction Inspection Receipt Modal */}
       {selectedTransaction && (
         <TransactionReceiptModal
           transaction={selectedTransaction}
@@ -858,7 +810,6 @@ const [authError, setAuthError] = useState<string | null>(null);
         />
       )}
 
-      {/* Open New Vault Modal */}
       {showNewVaultModal && (
         <OpenVaultModal
           onClose={() => setShowNewVaultModal(false)}
@@ -866,18 +817,13 @@ const [authError, setAuthError] = useState<string | null>(null);
         />
       )}
 
-      {/* User Profile & KYC Inspection Modal */}
       {showProfileModal && currentUser && (
         <UserProfileModal
           user={currentUser}
           onClose={() => setShowProfileModal(false)}
           onLogout={() => {
             setShowProfileModal(false);
-            void supabase.auth.signOut();
-           void AuthService.logout();
-            setCurrentUser(null);
-            setAuthMode('login');
-            showToast('Session locked. Signed out successfully.');
+            handleLogout();
           }}
           onOpenSupport={() => {
             setShowProfileModal(false);

@@ -27,6 +27,10 @@ import {
   SupportConversation
 } from '../../types/support';
 import { aiSupportService } from '../../services/aiSupportService';
+import {
+  useResizablePaneWidth,
+  ResizableSplitDivider,
+} from './ResizableMessagingSplit';
 
 interface AiChatWorkspaceProps {
   scope: 'client' | 'staff';
@@ -71,6 +75,21 @@ export const AiChatWorkspace: React.FC<AiChatWorkspaceProps> = ({
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const splitContainerRef = useRef<HTMLDivElement | null>(null);
+  const {
+    width: aiListWidth,
+    isDragging: isResizingAiList,
+    handlePointerDown: handleAiSplitPointerDown,
+    handleKeyDown: handleAiSplitKeyDown,
+    handleResetWidth: handleAiSplitReset,
+  } = useResizablePaneWidth({
+    storageKey: 'aureus_customer_ai_list_width',
+    defaultWidth: 290,
+    minWidth: 220,
+    maxWidth: 460,
+    minRemainingWidth: 360,
+    containerRef: splitContainerRef,
+  });
 
   // Hydrate AI conversation history from centralized AI service
   useEffect(() => {
@@ -430,19 +449,27 @@ export const AiChatWorkspace: React.FC<AiChatWorkspaceProps> = ({
 
   return (
     <div
+      ref={splitContainerRef}
       className={`flex-1 min-h-0 w-full rounded-2xl border shadow-xl overflow-hidden flex flex-col lg:flex-row ${
         isLight ? 'bg-white border-slate-200 text-slate-900' : 'bg-neutral-900 border-neutral-800 text-neutral-100'
       }`}
     >
       {/* Left Panel: AI Conversation History & Management */}
       <div
+        style={
+          !isSidebarCollapsed
+            ? ({ '--ai-list-w': `${aiListWidth}px` } as React.CSSProperties)
+            : undefined
+        }
         className={`${
           mobilePane === 'list' ? 'flex flex-1 lg:flex-none' : 'hidden lg:flex'
         } ${
           isSidebarCollapsed
-            ? 'w-full lg:w-[64px]'
-            : 'w-full lg:w-[270px] xl:w-[310px]'
-        } shrink-0 lg:border-r flex-col min-h-0 transition-[width] duration-200 overflow-hidden ${
+            ? 'w-full lg:w-[64px] lg:border-r'
+            : 'w-full lg:w-[var(--ai-list-w)]'
+        } shrink-0 flex-col min-h-0 ${
+          isResizingAiList ? 'transition-none' : 'transition-[width] duration-200'
+        } overflow-hidden ${
           isLight ? 'border-slate-200 bg-slate-50/70' : 'border-neutral-800 bg-neutral-950/40'
         }`}
       >
@@ -681,6 +708,21 @@ export const AiChatWorkspace: React.FC<AiChatWorkspaceProps> = ({
           </>
         )}
       </div>
+
+      {!isSidebarCollapsed && (
+        <ResizableSplitDivider
+          isDragging={isResizingAiList}
+          onPointerDown={handleAiSplitPointerDown}
+          onKeyDown={handleAiSplitKeyDown}
+          onDoubleClick={handleAiSplitReset}
+          currentWidth={aiListWidth}
+          minWidth={220}
+          maxWidth={460}
+          breakpoint="lg"
+          isLight={isLight}
+          ariaLabel="Resize AI conversation history and active chat panels"
+        />
+      )}
 
       {/* Right Panel: Full-Height Active AI Chat Room */}
       <div

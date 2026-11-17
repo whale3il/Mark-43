@@ -22,11 +22,8 @@ import {
 import { BankNotification, CurrencyCode } from '../types/banking';
 import { AuthUser } from '../types/auth';
 import { USER_PROFILE } from '../data/mockData';
-import { UserPortalRole } from '../types/support';
 
 interface HeaderProps {
-  portalMode?: UserPortalRole;
-  setPortalMode?: (mode: UserPortalRole) => void;
   maskBalance: boolean;
   setMaskBalance: (val: boolean | ((prev: boolean) => boolean)) => void;
   isDesignMode: boolean;
@@ -46,8 +43,6 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({
-  portalMode = 'CLIENT',
-  setPortalMode,
   maskBalance,
   setMaskBalance,
   isDesignMode,
@@ -142,44 +137,6 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Center / Right Main Navigation Elements */}
       <div className="flex items-center gap-2 md:gap-3">
-        {/* Role & Portal Workspace Switcher */}
-        {setPortalMode && (
-          <div className={`hidden sm:flex items-center p-0.5 rounded-lg border text-xs ${
-            isLight ? 'bg-slate-100 border-slate-200' : 'bg-neutral-900/90 border-neutral-800'
-          }`}>
-            {/* <button
-              onClick={() => setPortalMode('CLIENT')}
-              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                portalMode === 'CLIENT'
-                  ? isLight ? 'bg-white text-slate-900 shadow-2xs' : 'bg-neutral-800 text-emerald-400 font-bold shadow-2xs'
-                  : isLight ? 'text-slate-600 hover:text-slate-900' : 'text-neutral-400 hover:text-neutral-200'
-              }`}
-            >
-              Client
-            </button> */}
-            {/* <button
-              onClick={() => setPortalMode('STAFF')}
-              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
-                portalMode === 'STAFF'
-                  ? isLight ? 'bg-white text-slate-900 shadow-2xs' : 'bg-neutral-800 text-emerald-400 font-bold shadow-2xs'
-                  : isLight ? 'text-slate-600 hover:text-slate-900' : 'text-neutral-400 hover:text-neutral-200'
-              }`}
-            >
-              <Headphones className="w-3 h-3 text-emerald-400" />
-              <span>Staff (/staff)</span>
-            </button> */}
-            {/* <button
-              onClick={() => setPortalMode('ADMIN')}
-              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
-                portalMode === 'ADMIN'
-                  ? isLight ? 'bg-white text-slate-900 shadow-2xs' : 'bg-neutral-800 text-purple-400 font-bold shadow-2xs'
-                  : isLight ? 'text-slate-600 hover:text-slate-900' : 'text-neutral-400 hover:text-neutral-200'
-              }`}
-            >
-              <span>Admin (/admin)</span>
-            </button> */}
-          </div>
-        )}
 
         {/* Theme Switcher Button (Dark / Light) */}
         <button
