@@ -243,29 +243,29 @@ export class SupportService {
   /**
    * POST /api/support/canned-responses
    */
-  static async addCannedResponse(
-    template: Omit<CannedResponse, 'id'>
-  ): Promise<ApiResponse<CannedResponse>> {
-    const res = await apiRequest<CannedResponse>('/support/canned-responses', {
-      method: 'POST',
-      body: JSON.stringify(template)
-    });
+  // static async addCannedResponse(
+  //   template: Omit<CannedResponse, 'id'>
+  // ): Promise<ApiResponse<CannedResponse>> {
+  //   const res = await apiRequest<CannedResponse>('/support/canned-responses', {
+  //     method: 'POST',
+  //     body: JSON.stringify(template)
+  //   });
 
-    if (res.success && res.data) return res;
-    return {
-      success: true,
-      data: { ...template, id: `canned-${Date.now()}` }
-    };
-  }
+  //   if (res.success && res.data) return res;
+  //   return {
+  //     success: true,
+  //     data: { ...template, id: `canned-${Date.now()}` }
+  //   };
+  // }
 
   /**
    * DELETE /api/support/canned-responses/:id
    */
-  static async deleteCannedResponse(templateId: string): Promise<ApiResponse<void>> {
-    const res = await apiRequest<void>(`/support/canned-responses/${templateId}`, {
-      method: 'DELETE'
-    });
-    if (res.success) return res;
-    return { success: true };
-  }
+  // static async deleteCannedResponse(templateId: string): Promise<ApiResponse<void>> {
+  //   const res = await apiRequest<void>(`/support/canned-responses/${templateId}`, {
+  //     method: 'DELETE'
+  //   });
+  //   if (res.success) return res;
+  //   return { success: true };
+  // }
 }

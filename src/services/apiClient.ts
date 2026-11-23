@@ -4,7 +4,11 @@ export interface ApiResponse<T = any> {
   success: boolean;
   data?: T;
   message?: string;
-  error?: { code: string; message: string; field?: string } | string;
+  error?: {
+    code: string;
+    message: string;
+    field?: string;
+  } | string;
 }
 
 export interface ApiRequestOptions extends Omit<RequestInit, 'body'> {
@@ -16,51 +20,86 @@ export async function apiRequest<T = any>(
   options: ApiRequestOptions = {}
 ): Promise<ApiResponse<T>> {
   const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+
   const headers = new Headers(options.headers || {});
 
-  if (!headers.has('Content-Type') && options.body) {
-    headers.set('Content-Type', 'application/json');
-  }
-  headers.set('Accept', 'application/json');
+  let formattedBody: BodyInit | null | undefined;
 
-  if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('whales_token') || localStorage.getItem('aureus_auth_token');
-    if (token && !headers.has('Authorization')) {
-      headers.set('Authorization', `Bearer ${token}`);
+  if (options.body !== undefined && options.body !== null) {
+    if (
+      typeof options.body === 'string' ||
+      options.body instanceof FormData
+    ) {
+      formattedBody = options.body;
+    } else {
+      formattedBody = JSON.stringify(options.body);
     }
   }
 
-  let formattedBody: BodyInit | null | undefined = undefined;
-  if (options.body) {
-    formattedBody = typeof options.body === 'string' || options.body instanceof FormData
-      ? options.body
-      : JSON.stringify(options.body);
+  if (
+    formattedBody !== undefined &&
+    !(formattedBody instanceof FormData) &&
+    !headers.has('Content-Type')
+  ) {
+    headers.set('Content-Type', 'application/json');
   }
 
-  try {
-    const response = await fetch(url, { ...options, headers, body: formattedBody });
-    const isJson = response.headers.get('content-type')?.includes('application/json');
-    const result = isJson ? await response.json() : null;
+  headers.set('Accept', 'application/json');
 
-    if (!response.ok) {
+  try {
+    const response = await fetch(url, {
+      ...options,
+
+      // Allow browser to send and receive HttpOnly cookies.
+      credentials: 'include',
+
+      headers,
+      body: formattedBody,
+    });
+
+    const isJson = response.headers
+      .get('content-type')
+      ?.includes('application/json');
+
+    const result = isJson
+      ? await response.json()
+      : null;
+
+    if (!response.ok || result?.success === false) {
       return {
         success: false,
         error: {
-          code: result?.error?.code || `HTTP_${response.status}`,
-          message: typeof result?.error === 'string' ? result.error : result?.error?.message || `Request failed with status ${response.status}`,
+          code:
+            result?.error?.code ||
+            `HTTP_${response.status}`,
+
+          message:
+            typeof result?.error === 'string'
+              ? result.error
+              : result?.error?.message ||
+                result?.message ||
+                `Request failed with status ${response.status}`,
         },
       };
     }
 
     return {
       success: true,
-      data: result?.data !== undefined ? result.data : result,
+      data: result?.data !== undefined
+        ? result.data
+        : result,
       message: result?.message,
     };
+
   } catch (err: any) {
     return {
       success: false,
-      error: { code: 'NETWORK_ERROR', message: err?.message || 'Unable to connect to gateway.' },
+      error: {
+        code: 'NETWORK_ERROR',
+        message:
+          err?.message ||
+          'Unable to connect to gateway.',
+      },
     };
   }
 }

@@ -1195,7 +1195,7 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
                           <Paperclip className="w-4 h-4" />
                         )}
                       </button>
-
+               
                       <button
                         type="button"
                         onClick={handleToggleVoiceNote}

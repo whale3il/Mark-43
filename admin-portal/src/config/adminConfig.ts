@@ -1,11 +1,23 @@
 /**
- * Aureus Admin Portal — Independent Application Configuration
- * Strictly HTTP-only cookie authenticated (`credentials: 'include'`) without localStorage tokens.
+ * WhalesVault Admin Portal — Independent Application Configuration
+ *
+ * Authentication:
+ * - HTTP-only session cookies
+ * - credentials: 'include'
+ * - No localStorage authentication tokens
+ *
+ * Architecture:
+ * - Independent Admin Portal
+ * - Shared Express backend
+ * - Supabase Authentication
+ * - Prisma database integration
  */
 
 function normalizeAdminApiBaseUrl(raw?: string): string {
   const base = String(raw || '').trim().replace(/\/+$/, '');
+
   if (!base) return 'http://localhost:5000/api';
+
   return base.endsWith('/api') ? base : `${base}/api`;
 }
 
@@ -18,56 +30,89 @@ const RAW_ADMIN_API_BASE =
   'http://localhost:5000';
 
 export const ADMIN_CONFIG = {
-  appName: 'Aureus Admin Portal',
+  appName: 'WhalesVault Admin Portal',
+
   appSubtitle: 'Executive Operations Console',
-  apiOrigin: String(RAW_ADMIN_API_BASE).trim().replace(/\/+$/, ''),
+
+  apiOrigin: String(RAW_ADMIN_API_BASE)
+    .trim()
+    .replace(/\/+$/, ''),
+
   apiBaseUrl: normalizeAdminApiBaseUrl(RAW_ADMIN_API_BASE),
-  themeStorageKey: 'aureus_theme',
-  sidebarModeStorageKey: 'aureus_admin_sidebar_mode',
+
+  themeStorageKey: 'whalesvault_admin_theme',
+
+  sidebarModeStorageKey: 'whalesvault_admin_sidebar_mode',
+
   defaultMaxChats: 5,
+
   routes: {
     root: '/admin',
+
     signIn: '/admin/signin',
+
     loginAlias: '/admin/login',
+
     dashboard: '/admin/dashboard',
+
     staff: '/admin/staff',
+
     monitoring: '/admin/monitoring',
+
     tickets: '/admin/tickets',
+
     settings: '/admin/settings',
   },
+
   endpoints: {
     auth: {
       signIn: '/admin/auth/signin',
+
       logout: '/admin/auth/logout',
+
       session: '/admin/me',
+
       sessionFallback: '/admin/auth/me',
+
       renew: '/admin/auth/renew',
     },
+
     ably: {
       token: '/admin/ably/token',
+
       fallbackToken: '/support/ably/token',
     },
+
     admin: {
       overview: '/admin/overview',
+
       staff: '/admin/staff',
+
       conversations: '/admin/support/conversations',
+
       waitingQueue: '/admin/support/queue',
+
       tickets: '/admin/tickets',
+
       notifications: '/admin/settings/notifications',
+
       aiAssist: '/admin/ai/assist',
     },
+
     sharedSupport: {
       conversations: '/support/conversations',
+
       tickets: '/support/tickets',
+
       aiAssist: '/ai/assist',
     },
   },
 } as const;
 
+
 export const ADMIN_DEPARTMENTS = [
-  'Private Wealth',
-  'Treasury & Wires',
-  'Card Concierge',
-  'Security & Compliance',
-  'Institutional Lending',
+  'SUPPORT',
+  'OPERATIONS',
+  'COMPLIANCE',
+  'SECURITY',
 ] as const;

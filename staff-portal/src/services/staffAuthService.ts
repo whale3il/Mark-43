@@ -1,67 +1,199 @@
 import { STAFF_CONFIG } from '../config/staffConfig';
-import {
+
+import type {
   InviteVerificationData,
   StaffApiResult,
   StaffAvailabilityEnum,
   StaffMemberProfile,
   StaffSessionState,
 } from '../types/staff.types';
+
 import { staffApiRequest } from './staffApiClient';
 
-export function normalizeAvailability(raw?: unknown): StaffAvailabilityEnum {
-  const val = String(raw || '').trim().toUpperCase();
-  if (val === 'ONLINE' || val === 'BUSY' || val === 'AWAY' || val === 'OFFLINE') {
-    return val;
+/**
+ * Normalize staff availability to values supported
+ * by our Prisma StaffProfile model.
+ */
+export function normalizeAvailability(
+  raw?: unknown
+): StaffAvailabilityEnum {
+  const value = String(raw ?? '')
+    .trim()
+    .toUpperCase();
+
+  if (
+    value === 'ONLINE' ||
+    value === 'BUSY' ||
+    value === 'AWAY' ||
+    value === 'OFFLINE'
+  ) {
+    return value;
   }
+
   return 'OFFLINE';
 }
 
-export function normalizeStaffProfile(raw: any): StaffMemberProfile {
-  const name = raw?.name || raw?.fullName || raw?.email || 'Staff Specialist';
-  const parts = String(name).trim().split(/\s+/);
+/**
+ * Convert Express/Prisma staff data into the
+ * structure expected by the WhalesVault Staff Portal.
+ */
+export function normalizeStaffProfile(
+  raw: any
+): StaffMemberProfile {
+  const fullName = [
+    raw?.firstName ?? raw?.first_name,
+    raw?.lastName ?? raw?.last_name,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  const name = String(
+    raw?.name ||
+    raw?.fullName ||
+    fullName ||
+    raw?.email ||
+    'Staff Member'
+  );
+
+  const parts = name.trim().split(/\s+/);
+
   const initials =
     raw?.initials ||
-    (parts.length >= 2
-      ? `${parts[0][0] || ''}${parts[1][0] || ''}`.toUpperCase()
-      : name.slice(0, 2).toUpperCase());
+    (
+      parts.length >= 2
+        ? `${parts[0][0]}${parts[1][0]}`.toUpperCase()
+        : name.slice(0, 2).toUpperCase()
+    );
+
+  const rawMaxChats = Number(
+    raw?.maxChats ??
+    raw?.max_chats ??
+    STAFF_CONFIG.defaultMaxChats
+  );
+
+  const maxChats =
+    Number.isFinite(rawMaxChats) && rawMaxChats > 0
+      ? rawMaxChats
+      : STAFF_CONFIG.defaultMaxChats;
+
+  const rawActiveChats = Number(
+    raw?.activeChats ??
+    raw?.activeChatsCount ??
+    raw?.active_chats ??
+    raw?.active_chats_count ??
+    raw?.activeConversationsCount ??
+    0
+  );
+
+  const activeChatsCount =
+    Number.isFinite(rawActiveChats)
+      ? Math.max(0, rawActiveChats)
+      : 0;
 
   return {
-    id: String(raw?.id || raw?.staffId || ''),
+    id: String(raw?.id || raw?.staffId || raw?.userId || ''),
+
     email: String(raw?.email || ''),
+
     name,
-    role: String(raw?.role || raw?.title || 'Support Specialist'),
-    department: String(raw?.department || 'Private Wealth Support'),
-    specialization: raw?.specialization || raw?.specialty || undefined,
+
     initials,
-    avatarUrl: raw?.avatarUrl || raw?.avatar_url || undefined,
-    availability: normalizeAvailability(raw?.availability ?? raw?.status),
-    maxChats: Number(raw?.maxChats ?? raw?.max_chats ?? STAFF_CONFIG.defaultMaxChats) || STAFF_CONFIG.defaultMaxChats,
-    activeChatsCount: Number(
-      raw?.activeChatsCount ??
-        raw?.active_chats_count ??
-        raw?.activeConversationsCount ??
-        0
+
+    role: String(raw?.role || 'STAFF'),
+
+    department: String(raw?.department || 'SUPPORT'),
+
+    specialization:
+      raw?.specialization ??
+      raw?.specialty ??
+      undefined,
+
+    avatarUrl:
+      raw?.avatarUrl ??
+      raw?.avatar_url ??
+      undefined,
+
+    availability: normalizeAvailability(
+      raw?.availability ?? raw?.staffProfile?.availability
     ),
+
+    maxChats,
+
+    activeChatsCount,
+
     license: raw?.license,
+
     office: raw?.office,
-    directPhone: raw?.directPhone || raw?.direct_phone,
-    responseTime: raw?.responseTime || raw?.response_time,
-    rating: typeof raw?.rating === 'number' ? raw.rating : undefined,
-    lastSeenAt: raw?.lastSeenAt || raw?.last_seen_at,
+
+    directPhone:
+      raw?.directPhone ??
+      raw?.direct_phone,
+
+    responseTime:
+      raw?.responseTime ??
+      raw?.response_time,
+
+    rating:
+      typeof raw?.rating === 'number'
+        ? raw.rating
+        : undefined,
+
+    lastSeenAt:
+      raw?.lastSeenAt ??
+      raw?.last_seen_at,
   };
+}
+
+/**
+ * Extract staff identity from supported backend
+ * authentication response structures.
+ */
+function extractStaff(raw: any): any {
+  return raw?.staff ?? raw?.user ?? raw;
+}
+
+/**
+ * Validate the identity supplied by the backend.
+ *
+ * This is frontend response validation only.
+ * Actual authorization remains the responsibility
+ * of Express requireStaff middleware.
+ */
+function isValidStaff(raw: any): boolean {
+  return Boolean(
+    raw &&
+    typeof raw.id === 'string' &&
+    raw.id.length > 0 &&
+    typeof raw.email === 'string' &&
+    raw.email.length > 0 &&
+    raw.role === 'STAFF'
+  );
 }
 
 export const staffAuthService = {
   /**
-   * Restores active cookie-backed staff session from verified backend endpoint.
+   * Restore an existing HTTP-only cookie session.
+   *
+   * Requires a protected backend session endpoint.
    */
-  async restoreSession(): Promise<StaffApiResult<StaffSessionState>> {
-    let res = await staffApiRequest<any>(STAFF_CONFIG.endpoints.auth.session, {
-      method: 'GET',
-      skipUnauthorizedEvent: true,
-    });
+  async restoreSession(): Promise<
+    StaffApiResult<StaffSessionState>
+  > {
+    let res = await staffApiRequest<any>(
+      STAFF_CONFIG.endpoints.auth.session,
+      {
+        method: 'GET',
+        skipUnauthorizedEvent: true,
+      }
+    );
 
-    if (!res.success && res.error?.unimplemented) {
+    // Temporary compatibility with an alternative
+    // backend session endpoint.
+    if (
+      !res.success &&
+      res.error?.unimplemented &&
+      res.error.status === 404
+    ) {
       res = await staffApiRequest<any>(
         STAFF_CONFIG.endpoints.auth.sessionFallback,
         {
@@ -76,18 +208,20 @@ export const staffAuthService = {
         success: false,
         error: res.error || {
           code: 'NO_SESSION',
-          message: 'No active staff session.',
+          message: 'No active WhalesVault staff session.',
         },
       };
     }
 
-    const rawStaff = res.data.staff || res.data.user || res.data;
-    if (!rawStaff || (!rawStaff.id && !rawStaff.email)) {
+    const rawStaff = extractStaff(res.data);
+
+    if (!isValidStaff(rawStaff)) {
       return {
         success: false,
         error: {
           code: 'INVALID_SESSION_PAYLOAD',
-          message: 'Session response missing verified staff identity.',
+          message:
+            'The backend did not return a valid staff identity.',
         },
       };
     }
@@ -102,103 +236,25 @@ export const staffAuthService = {
   },
 
   /**
-   * Authenticates staff user and receives HTTP-only session cookie.
+   * Authenticate a staff member using Express
+   * and Supabase Auth.
+   *
+   * Express creates a PostgreSQL-backed session
+   * and sets the HTTP-only staff cookie.
    */
   async signIn(payload: {
     email: string;
     password: string;
   }): Promise<StaffApiResult<StaffSessionState>> {
-    const res = await staffApiRequest<any>(STAFF_CONFIG.endpoints.auth.signIn, {
-      method: 'POST',
-      skipUnauthorizedEvent: true,
-      body: JSON.stringify({
-        email: payload.email.trim(),
-        password: payload.password,
-      }),
-    });
-
-    if (!res.success) {
-      return {
-        success: false,
-        error: res.error,
-      };
-    }
-
-    const rawStaff = res.data?.staff || res.data?.user || res.data;
-    if (rawStaff && (rawStaff.id || rawStaff.email)) {
-      return {
-        success: true,
-        data: {
-          staff: normalizeStaffProfile(rawStaff),
-          expiresAt: res.data?.expiresAt,
-        },
-      };
-    }
-
-    // Some cookie auth endpoints return { ok: true } and require /me follow-up
-    return this.restoreSession();
-  },
-
-  /**
-   * Verifies a staff onboarding invitation via GET /api/staff/auth/invite (query token or onboarding cookie).
-   */
-  async verifyInvite(
-    token?: string
-  ): Promise<StaffApiResult<InviteVerificationData>> {
-    const trimmed = token?.trim();
-    const path = trimmed
-      ? `${STAFF_CONFIG.endpoints.auth.inviteVerify}?${new URLSearchParams({ token: trimmed }).toString()}`
-      : STAFF_CONFIG.endpoints.auth.inviteVerify;
-
-    const res = await staffApiRequest<any>(path, {
-      method: 'GET',
-      skipUnauthorizedEvent: true,
-    });
-
-    if (!res.success || !res.data) {
-      return {
-        success: false,
-        error: res.error,
-      };
-    }
-
-    return {
-      success: true,
-      data: {
-        valid: res.data.valid !== false,
-        email: res.data.email,
-        name: res.data.name,
-        department: res.data.department,
-        role: res.data.role,
-        expiresAt: res.data.expiresAt,
-        message: res.data.message,
-      },
-    };
-  },
-
-  /**
-   * Submits password setup for an invited staff member via POST /api/staff/auth/set-password.
-   * Uses HTTP-only onboarding cookie (`credentials: 'include'`) and optional token if present.
-   */
-  async setPassword(payload: {
-    token?: string;
-    password: string;
-    confirmPassword?: string;
-  }): Promise<StaffApiResult<{ authenticated: boolean; staff?: StaffMemberProfile }>> {
-    const bodyPayload: Record<string, string> = {
-      password: payload.password,
-      confirmPassword: payload.confirmPassword ?? payload.password,
-    };
-    if (payload.token?.trim()) {
-      bodyPayload.token = payload.token.trim();
-    }
-
     const res = await staffApiRequest<any>(
-      STAFF_CONFIG.endpoints.auth.setPassword,
+      STAFF_CONFIG.endpoints.auth.signIn,
       {
         method: 'POST',
         skipUnauthorizedEvent: true,
-        body: JSON.stringify(bodyPayload),
+        body: JSON.stringify({
+          email: payload.email.trim(),
+          password: payload.password,
+        }),
       }
     );
 
@@ -209,24 +265,168 @@ export const staffAuthService = {
       };
     }
 
-    const rawStaff = res.data?.staff || res.data?.user;
+    const rawStaff = extractStaff(res.data);
+
+    if (isValidStaff(rawStaff)) {
+      return {
+        success: true,
+        data: {
+          staff: normalizeStaffProfile(rawStaff),
+          expiresAt: res.data?.expiresAt,
+        },
+      };
+    }
+
+    // Only an authenticated backend session
+    // endpoint can establish the staff identity.
+    return staffAuthService.restoreSession();
+  },
+
+  /**
+   * Begin Supabase invitation verification.
+   *
+   * Our Express backend uses:
+   *
+   * GET /api/staff/auth/invite
+   *   ?token_hash=...
+   *   &type=invite
+   *
+   * The backend verifies the invitation, creates
+   * an HTTP-only onboarding cookie, and redirects
+   * the browser to /staff/set-password.
+   *
+   * This is navigation, not a JSON API request.
+   */
+  async verifyInvite(
+    tokenHash?: string
+  ): Promise<StaffApiResult<InviteVerificationData>> {
+    const trimmed = tokenHash?.trim();
+
+    if (!trimmed) {
+      return {
+        success: false,
+        error: {
+          code: 'INVITE_CALLBACK_REQUIRED',
+          message:
+            'Invitation verification must begin through the secure WhalesVault invitation link.',
+        },
+      };
+    }
+
+    if (typeof window === 'undefined') {
+      return {
+        success: false,
+        error: {
+          code: 'BROWSER_REQUIRED',
+          message:
+            'Invitation verification requires a browser.',
+        },
+      };
+    }
+
+    const query = new URLSearchParams({
+      token_hash: trimmed,
+      type: 'invite',
+    });
+
+    const url =
+      `${STAFF_CONFIG.apiBaseUrl}` +
+      `${STAFF_CONFIG.endpoints.auth.inviteVerify}` +
+      `?${query.toString()}`;
+
+    // Navigate directly so the browser follows
+    // the backend's invitation verification redirect.
+    window.location.assign(url);
+
+    // This is not proof of verification.
+    // The browser is navigating to the backend.
     return {
-      success: true,
-      message: res.message || 'Password configured successfully.',
-      data: {
-        authenticated: Boolean(res.data?.authenticated || rawStaff),
-        staff: rawStaff ? normalizeStaffProfile(rawStaff) : undefined,
+      success: false,
+      error: {
+        code: 'INVITE_REDIRECT_STARTED',
+        message: 'Opening secure invitation verification.',
       },
     };
   },
 
   /**
-   * Terminates HTTP-only staff cookie session via POST /api/staff/auth/logout.
+   * Set the password for an invited staff member.
+   *
+   * The backend reads the secure HTTP-only
+   * onboarding cookie.
+   *
+   * No invitation token needs to be sent
+   * in the request body.
+   */
+  async setPassword(payload: {
+    token?: string;
+    password: string;
+    confirmPassword?: string;
+  }): Promise<
+    StaffApiResult<{
+      authenticated: boolean;
+      staff?: StaffMemberProfile;
+    }>
+  > {
+    const password = payload.password;
+
+    const confirmPassword =
+      payload.confirmPassword ?? password;
+
+    if (!password || password !== confirmPassword) {
+      return {
+        success: false,
+        error: {
+          code: 'PASSWORD_VALIDATION_FAILED',
+          message:
+            'Password and confirmation must match.',
+        },
+      };
+    }
+
+    const res = await staffApiRequest<any>(
+      STAFF_CONFIG.endpoints.auth.setPassword,
+      {
+        method: 'POST',
+        skipUnauthorizedEvent: true,
+        body: JSON.stringify({
+          password,
+          confirmPassword,
+        }),
+      }
+    );
+
+    if (!res.success) {
+      return {
+        success: false,
+        error: res.error,
+      };
+    }
+
+    return {
+      success: true,
+      message:
+        res.message ||
+        'Password configured successfully. Please sign in.',
+      data: {
+        // Password setup does not create
+        // a signed-in staff session.
+        authenticated: false,
+      },
+    };
+  },
+
+  /**
+   * Revoke the staff session on Express
+   * and clear the HTTP-only session cookie.
    */
   async signOut(): Promise<StaffApiResult<void>> {
-    return staffApiRequest<void>(STAFF_CONFIG.endpoints.auth.logout, {
-      method: 'POST',
-      skipUnauthorizedEvent: true,
-    });
+    return staffApiRequest<void>(
+      STAFF_CONFIG.endpoints.auth.logout,
+      {
+        method: 'POST',
+        skipUnauthorizedEvent: true,
+      }
+    );
   },
 };

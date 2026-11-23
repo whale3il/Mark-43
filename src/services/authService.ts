@@ -97,25 +97,27 @@ export class AuthService {
    * Connection point: POST /api/auth/login
    */
   static async login(payload: LoginPayload): Promise<AuthApiResponse> {
-    const res = await apiRequest<{ message: string; user: any; session: any; token?: string }>('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    });
+  const res = await apiRequest<{
+    message: string;
+    user: AuthUser;
+  }>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 
-    if (res.success && res.data) {
-      return {
-        success: true,
-        user: res.data.user,
-        token: res.data.session?.access_token || res.data.token,
-        message: res.data.message
-      };
-    }
-
+  if (!res.success || !res.data) {
     return {
       success: false,
-      error: formatErrorMessage(res.error)
+      error: formatErrorMessage(res.error),
     };
   }
+
+  return {
+    success: true,
+    user: res.data.user,
+    message: res.data.message || 'Login successful.',
+  };
+}
 
   /**
    * Connection point: POST /api/auth/google
@@ -145,12 +147,16 @@ export class AuthService {
     };
   }
 
-static async syncGoogleUser(accessToken: string) {
+static async syncGoogleUser(
+  accessToken: string,
+  refreshToken: string
+) {
   return apiRequest<AuthUser>("/auth/google/sync", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
     },
+    body: JSON.stringify({ refreshToken }),
   });
 }
 

@@ -120,12 +120,19 @@ export default function App() {
         if (!verified.user.email_confirmed_at) throw new Error('Please verify your email before continuing.');
 
         // Google sessions synchronize via the Google endpoint; password sessions via /api/auth/me.
-        const isGoogle = verified.user.app_metadata?.provider === 'google';
+        const isGoogle =
+  verified.user.app_metadata?.provider === 'google' ||
+  verified.user.identities?.some(
+    identity => identity.provider === 'google'
+  ) === true;
         const token = data.session.access_token;
         let user: AuthUser;
 
         if (isGoogle) {
-          const response = await AuthService.syncGoogleUser(token);
+        const response = await AuthService.syncGoogleUser(
+          data.session.access_token,
+          data.session.refresh_token
+        );;
           if (!response.success || !response.data) {
             throw new Error(
               typeof response.error === 'string'
@@ -135,19 +142,31 @@ export default function App() {
           }
           user = response.data;
         } else {
-          const response = await fetch('/api/auth/me', {
-            headers: { Authorization: `Bearer ${token}` }
-          });
-          if (!response.ok) throw new Error('Unable to restore your account profile.');
-          const payload = await response.json();
-          if (!payload.success || !payload.data) throw new Error('Account profile not found.');
-          user = { ...payload.data, name: `${payload.data.firstName} ${payload.data.lastName}` };
-        }
+    const customer = await AuthService.getCurrentUser();
 
+    if (!customer) {
+      throw new Error('Unable to restore your account profile.');
+    }
+
+    user = customer;
+  }
         if (!active) return;
-        localStorage.setItem('whales_token', token);
-        setCurrentUser(user);
-        setActiveTab('dashboard');
+// Retrieve the authenticated customer using the HttpOnly cookie.
+const customer = await AuthService.getCurrentUser();
+
+        if (!customer) {
+            throw new Error('Unable to restore customer session.');
+          }
+
+          if (!active) return;
+
+          setCurrentUser(customer);
+          setActiveTab('dashboard');
+          setIsDesignMode(false);
+
+          if (window.location.pathname === '/auth/callback') {
+            window.history.replaceState({}, '', '/');
+}
         setIsDesignMode(false);
         if (window.location.pathname === '/auth/callback') {
           window.history.replaceState({}, '', '/');
@@ -155,7 +174,7 @@ export default function App() {
       } catch (err) {
         console.error('Authentication error:', err);
         if (active) {
-          localStorage.removeItem('whales_token');
+          // localStorage.removeItem('whales_token');
           setAuthError(err instanceof Error ? err.message : 'Authentication failed.');
         }
       } finally {
