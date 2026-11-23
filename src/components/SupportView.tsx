@@ -1,16 +1,17 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   MessageSquare,
   Send,
   Phone,
   Video,
-  ShieldCheck,
   Search,
   Plus,
   Paperclip,
   CheckCheck,
+  Check,
   FileText,
   Mic,
+  Square,
   Headphones,
   X,
   Play,
@@ -21,7 +22,13 @@ import {
   ChevronDown,
   ChevronRight,
   Sparkles,
-  ArrowLeft
+  ArrowLeft,
+  Clock,
+  AlertCircle,
+  Download,
+  Loader2,
+  LogOut,
+  RotateCcw,
 } from 'lucide-react';
 import {
   SupportAgent,
@@ -29,12 +36,17 @@ import {
   SupportConversation,
   SupportTicket,
   TicketPriority,
-  InquiryCategory
+  InquiryCategory,
+  SupportCallSession,
+  SupportCallType,
 } from '../types/support';
 import { ablyService } from '../services/ablyService';
-import { SupportService } from '../services/supportService';
+import { SupportService, isSafeMediaUrl } from '../services/supportService';
+import { WebRtcCallManager } from '../services/webrtcCallManager';
 import { CustomerWelcomeModal } from './support/CustomerWelcomeModal';
 import { AiChatWorkspace } from './support/AiChatWorkspace';
+import { SupportCallOverlay, CallOverlayPhase } from './support/SupportCallOverlay';
+import { EndSessionConfirmModal } from './support/EndSessionConfirmModal';
 import {
   useResizablePaneWidth,
   ResizableSplitDivider,
@@ -50,10 +62,59 @@ interface SupportViewProps {
     clientTier: string;
     avatarUrl?: string;
   };
+  isLoadingConversations?: boolean;
   onUnreadChange?: (totalUnread: number) => void;
   onUpdateConversations?: (conversations: SupportConversation[]) => void;
   onCreateTicket?: (ticket: SupportTicket) => void;
   theme?: 'dark' | 'light';
+}
+
+function mergeConversationMessages(
+  existing: SupportMessage[],
+  incoming: SupportMessage[]
+): SupportMessage[] {
+  const byKey = new Map<string, SupportMessage>();
+  const failedLocals: SupportMessage[] = [];
+
+  for (const m of existing) {
+    if (m.failed) {
+      failedLocals.push(m);
+      continue;
+    }
+    byKey.set(m.id, m);
+  }
+
+  for (const srv of incoming) {
+    if (srv.clientTempId) {
+      for (const [k, v] of byKey.entries()) {
+        if (k === srv.clientTempId || v.clientTempId === srv.clientTempId) {
+          byKey.delete(k);
+        }
+      }
+    }
+    const prev = byKey.get(srv.id);
+    byKey.set(srv.id, prev ? { ...prev, ...srv, pending: false, failed: false } : srv);
+  }
+
+  return [...Array.from(byKey.values()), ...failedLocals];
+}
+
+function appendOrReconcileMessage(
+  existing: SupportMessage[],
+  incoming: SupportMessage
+): SupportMessage[] {
+  const idx = existing.findIndex(
+    (m) =>
+      m.id === incoming.id ||
+      (Boolean(incoming.clientTempId) &&
+        (m.clientTempId === incoming.clientTempId || m.id === incoming.clientTempId))
+  );
+  if (idx >= 0) {
+    const next = [...existing];
+    next[idx] = { ...next[idx], ...incoming, pending: false, failed: false };
+    return next;
+  }
+  return [...existing, incoming];
 }
 
 export const SupportView: React.FC<SupportViewProps> = ({
@@ -61,10 +122,11 @@ export const SupportView: React.FC<SupportViewProps> = ({
   conversations: propConversations,
   tickets: propTickets,
   currentCustomer,
+  isLoadingConversations = false,
   onUnreadChange,
   onUpdateConversations,
   onCreateTicket,
-  theme = 'dark'
+  theme = 'dark',
 }) => {
   const isLight = theme === 'light';
 
@@ -95,7 +157,6 @@ export const SupportView: React.FC<SupportViewProps> = ({
 
   const customerId = currentCustomer?.id || 'usr_alexander_wright';
   const customerName = currentCustomer?.name || 'Private Client';
-  const customerTier = currentCustomer?.clientTier || 'Aureus Sovereign Private Client';
 
   const [conversations, setConversations] = useState<SupportConversation[]>(() => propConversations || []);
   const [tickets, setTickets] = useState<SupportTicket[]>(() => propTickets || []);
@@ -112,7 +173,9 @@ export const SupportView: React.FC<SupportViewProps> = ({
     }
   }, [propTickets]);
 
-  const customerConversations = conversations.filter((c) => c.customerId === customerId);
+  const customerConversations = conversations.filter(
+    (c) => (!c.customerId || c.customerId === customerId) && c.status !== 'closed'
+  );
   const customerTickets = tickets.filter((t) => !t.customerId || t.customerId === customerId);
 
   const [selectedConversationId, setSelectedConversationId] = useState<string>(
@@ -125,11 +188,16 @@ export const SupportView: React.FC<SupportViewProps> = ({
       !customerConversations.some((c) => c.id === selectedConversationId)
     ) {
       setSelectedConversationId(customerConversations[0].id);
+    } else if (customerConversations.length === 0 && selectedConversationId) {
+      setSelectedConversationId('');
     }
   }, [customerConversations, selectedConversationId]);
 
   const activeConversation =
     customerConversations.find((c) => c.id === selectedConversationId) || customerConversations[0];
+
+  const activeConvIdRef = useRef<string>('');
+  activeConvIdRef.current = activeConversation?.id || '';
 
   const staff = propStaffList || [];
 
@@ -140,16 +208,27 @@ export const SupportView: React.FC<SupportViewProps> = ({
   // Modals & Inputs
   const [showWelcomeModal, setShowWelcomeModal] = useState(false);
   const [inputText, setInputText] = useState('');
-  const [isAgentTyping, setIsAgentTyping] = useState(false);
-  const [typingAgentName, setTypingAgentName] = useState('');
+  const [typingByConv, setTypingByConv] = useState<Record<string, { active: boolean; name?: string }>>({});
+  const [actionNotice, setActionNotice] = useState<{ type: 'info' | 'error'; text: string } | null>(null);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
 
-  // Voice recording state
+  // Voice recording & playback state
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
 
-  // Audio / Video call modal placeholder
-  const [showCallModal, setShowCallModal] = useState(false);
+  // Real WebRTC Audio / Video call state
+  const [activeCall, setActiveCall] = useState<SupportCallSession | null>(null);
+  const [callPhase, setCallPhase] = useState<CallOverlayPhase>('ended');
+  const [callError, setCallError] = useState<string | null>(null);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+
+  // End Session Confirmation state
+  const [showEndSessionModal, setShowEndSessionModal] = useState(false);
+  const [isEndingSession, setIsEndingSession] = useState(false);
+  const [endSessionError, setEndSessionError] = useState<string | null>(null);
 
   // New ticket modal
   const [showCreateTicketModal, setShowCreateTicketModal] = useState(false);
@@ -159,13 +238,65 @@ export const SupportView: React.FC<SupportViewProps> = ({
   const [newTicketDesc, setNewTicketDesc] = useState('');
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingSecondsRef = useRef<number>(0);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+  const callManagerRef = useRef<WebRtcCallManager | null>(null);
+  const activeCallRef = useRef<SupportCallSession | null>(null);
+  activeCallRef.current = activeCall;
+  const onUpdateConversationsRef = useRef(onUpdateConversations);
+  onUpdateConversationsRef.current = onUpdateConversations;
+
+  const isAgentTyping = Boolean(
+    activeConversation && typingByConv[activeConversation.id]?.active
+  );
+  const typingAgentName = activeConversation
+    ? typingByConv[activeConversation.id]?.name || activeConversation.agent.name
+    : '';
+
+  const applyConversationsUpdate = useCallback(
+    (updater: (prev: SupportConversation[]) => SupportConversation[]) => {
+      setConversations((prev) => {
+        const next = updater(prev);
+        onUpdateConversationsRef.current?.(next);
+        return next;
+      });
+    },
+    []
+  );
+
+  const cleanupMediaAndCall = useCallback(() => {
+    if (callManagerRef.current) {
+      callManagerRef.current.dispose();
+      callManagerRef.current = null;
+    }
+    setLocalStream(null);
+    setRemoteStream(null);
+  }, []);
 
   useEffect(() => {
     return () => {
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        try {
+          mediaRecorderRef.current.stream.getTracks().forEach((t) => t.stop());
+          mediaRecorderRef.current.stop();
+        } catch {
+          // Ignore recorder teardown
+        }
+      }
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+        audioPlayerRef.current = null;
+      }
+      cleanupMediaAndCall();
     };
-  }, []);
+  }, [cleanupMediaAndCall]);
 
   // Auto scroll to latest message inside the chat feed only
   useEffect(() => {
@@ -178,72 +309,251 @@ export const SupportView: React.FC<SupportViewProps> = ({
     onUnreadChange?.(total);
   }, [customerConversations, onUnreadChange]);
 
-  // Subscribe to Ably Realtime for active conversation
-  useEffect(() => {
-    if (!activeConversation) return;
-
-    const leavePresence = ablyService.enterPresence(activeConversation.id, {
-      clientId: customerId,
-      data: {
-        name: customerName,
-        role: 'customer',
-        status: 'online'
-      }
-    });
-
-    const unsubMessages = ablyService.subscribeToMessages(activeConversation.id, (newMsg) => {
-      setConversations((prev) => {
-        const target = prev.find((c) => c.id === activeConversation.id);
-        if (!target || target.messages.some((m) => m.id === newMsg.id)) return prev;
-        const nextList = prev.map((c) =>
-          c.id === activeConversation.id
-            ? {
+  const fetchConversationMessages = useCallback(
+    async (convId: string) => {
+      if (!convId) return;
+      setIsLoadingMessages(true);
+      try {
+        const res = await SupportService.getMessages(convId);
+        if (res.success && res.data) {
+          const serverMessages = res.data;
+          applyConversationsUpdate((prev) =>
+            prev.map((c) => {
+              if (c.id !== convId) return c;
+              const merged = mergeConversationMessages(c.messages, serverMessages);
+              const latest = merged[merged.length - 1];
+              return {
                 ...c,
-                messages: [...c.messages, newMsg],
-                lastMessage: newMsg.text,
-                lastMessageTimestamp: newMsg.timestamp
-              }
-            : c
-        );
-        onUpdateConversations?.(nextList);
-        return nextList;
-      });
-    });
+                messages: merged,
+                lastMessage: latest?.text || c.lastMessage,
+                lastMessageTimestamp: latest?.timestamp || c.lastMessageTimestamp,
+              };
+            })
+          );
+          if (serverMessages.some((m) => m.sender === 'agent' && m.status !== 'read')) {
+            SupportService.markRead(convId).catch(() => {});
+          }
+        }
+      } finally {
+        setIsLoadingMessages(false);
+      }
+    },
+    [applyConversationsUpdate]
+  );
 
-    const unsubTyping = ablyService.subscribeToTyping(activeConversation.id, (userId, typing, name) => {
-      if (userId !== customerId) {
-        setIsAgentTyping(typing);
-        if (name) setTypingAgentName(name);
+  // Load persisted messages + active call status whenever active conversation changes
+  useEffect(() => {
+    if (!activeConversation?.id) return;
+    const convId = activeConversation.id;
+    fetchConversationMessages(convId);
+
+    SupportService.listCalls(convId).then((res) => {
+      if (!res.success || !res.data || activeConvIdRef.current !== convId) return;
+      const incoming = res.data.find(
+        (c) => c.status === 'ringing' && c.initiatorId && c.initiatorId !== customerId
+      );
+      if (incoming && !activeCallRef.current) {
+        setActiveCall(incoming);
+        setCallPhase('incoming_ringing');
+        setCallError(null);
       }
     });
+  }, [activeConversation?.id, customerId, fetchConversationMessages]);
+
+  const createManagerForCall = useCallback(
+    (call: SupportCallSession) => {
+      cleanupMediaAndCall();
+      const manager = new WebRtcCallManager(
+        call.conversationId,
+        call.type,
+        {
+          onLocalStream: (s) => setLocalStream(s),
+          onRemoteStream: (s) => setRemoteStream(s),
+          onConnectionState: (state) => {
+            if (state === 'connected') {
+              setCallPhase('active');
+            } else if (state === 'connecting') {
+              setCallPhase('connecting');
+            } else if (state === 'failed') {
+              setCallPhase('error');
+              setCallError('WebRTC peer connection failed to establish media.');
+            }
+          },
+          onSignal: (signal) => {
+            SupportService.sendCallSignal(call.id, {
+              ...signal,
+              fromUserId: customerId,
+            }).catch(() => {});
+          },
+        },
+        call.iceServers
+      );
+      callManagerRef.current = manager;
+      return manager;
+    },
+    [cleanupMediaAndCall, customerId]
+  );
+
+  // Subscribe to Ably Realtime for all active/waiting customer conversations
+  const activeConvIdsKey = customerConversations.map((c) => c.id).join(',');
+
+  useEffect(() => {
+    const convIds = activeConvIdsKey ? activeConvIdsKey.split(',') : [];
+    if (convIds.length === 0 || !customerId) return;
+
+    const unsubscribers = convIds.map((convId) =>
+      ablyService.subscribeConversation(convId, { id: customerId, name: customerName }, {
+        onMessageNew: (incomingMsg) => {
+          const isCurrentlyViewing = activeConvIdRef.current === convId;
+          applyConversationsUpdate((prev) =>
+            prev.map((c) => {
+              if (c.id !== convId) return c;
+              const nextMessages = appendOrReconcileMessage(c.messages, incomingMsg);
+              return {
+                ...c,
+                messages: nextMessages,
+                lastMessage: incomingMsg.text,
+                lastMessageTimestamp: incomingMsg.timestamp,
+                unreadCount:
+                  incomingMsg.sender === 'agent' && !isCurrentlyViewing
+                    ? c.unreadCount + 1
+                    : isCurrentlyViewing
+                    ? 0
+                    : c.unreadCount,
+              };
+            })
+          );
+
+          if (incomingMsg.sender === 'agent') {
+            SupportService.markDelivered(convId, incomingMsg.id).catch(() => {});
+            if (isCurrentlyViewing) {
+              SupportService.markRead(convId, incomingMsg.id).catch(() => {});
+            }
+          }
+        },
+        onTyping: (_userId, isTyping, name) => {
+          setTypingByConv((prev) => ({
+            ...prev,
+            [convId]: { active: isTyping, name },
+          }));
+        },
+        onReceipt: (messageId, status) => {
+          applyConversationsUpdate((prev) =>
+            prev.map((c) =>
+              c.id === convId
+                ? {
+                    ...c,
+                    messages: c.messages.map((m) =>
+                      m.id === messageId ? { ...m, status } : m
+                    ),
+                  }
+                : c
+            )
+          );
+        },
+        onConversationUpdated: (patch) => {
+          applyConversationsUpdate((prev) =>
+            prev.map((c) => {
+              if (c.id !== convId) return c;
+              return {
+                ...c,
+                status: patch.status || c.status,
+                agent: patch.agent ? { ...c.agent, ...patch.agent } : c.agent,
+                assignedStaffId: patch.agent?.id || c.assignedStaffId,
+                department: patch.agent?.department || c.department,
+                queuePosition:
+                  patch.queuePosition !== undefined ? patch.queuePosition : c.queuePosition,
+              };
+            })
+          );
+        },
+        onSessionEnded: () => {
+          applyConversationsUpdate((prev) => prev.filter((c) => c.id !== convId));
+          if (activeConvIdRef.current === convId) {
+            setSelectedConversationId('');
+            setShowEndSessionModal(false);
+            cleanupMediaAndCall();
+            setActiveCall(null);
+            setActionNotice({
+              type: 'info',
+              text: 'Your support session has been closed. Start a new inquiry anytime.',
+            });
+          }
+        },
+        onCallEvent: (eventType, call) => {
+          if (eventType === 'incoming') {
+            if (call.initiatorId === customerId || activeCallRef.current?.id === call.id) return;
+            setActiveCall(call);
+            setCallPhase('incoming_ringing');
+            setCallError(null);
+          } else if (eventType === 'accepted') {
+            if (activeCallRef.current?.id === call.id) {
+              setActiveCall((prev) => (prev ? { ...prev, status: 'accepted' } : call));
+              setCallPhase('connecting');
+              if (call.initiatorId === customerId || !callManagerRef.current) {
+                const mgr = callManagerRef.current || createManagerForCall(call);
+                mgr.createAndSendOffer().catch((err) => {
+                  setCallPhase('error');
+                  setCallError(err?.message || 'Microphone/camera access denied.');
+                });
+              }
+            }
+          } else if (eventType === 'rejected') {
+            if (activeCallRef.current?.id === call.id) {
+              cleanupMediaAndCall();
+              setCallPhase('rejected');
+              setCallError('The specialist is unavailable or declined the call.');
+            }
+          } else if (eventType === 'ended') {
+            if (activeCallRef.current?.id === call.id) {
+              cleanupMediaAndCall();
+              setCallPhase('ended');
+            }
+          }
+        },
+        onCallSignal: (signal) => {
+          if (activeCallRef.current?.id === signal.callId && callManagerRef.current) {
+            callManagerRef.current.handleSignal(signal).catch((err) => {
+              setCallPhase('error');
+              setCallError(err?.message || 'WebRTC signaling error.');
+            });
+          }
+        },
+        onReconnected: () => {
+          fetchConversationMessages(convId);
+        },
+      })
+    );
 
     return () => {
-      leavePresence();
-      unsubMessages();
-      unsubTyping();
+      unsubscribers.forEach((unsub) => unsub());
     };
-  }, [activeConversation?.id, customerId, customerName]);
-
-  const updateConversationInState = (updatedConv: SupportConversation) => {
-    setConversations((prev) => {
-      const next = prev.map((c) => (c.id === updatedConv.id ? updatedConv : c));
-      onUpdateConversations?.(next);
-      return next;
-    });
-  };
+  }, [
+    activeConvIdsKey,
+    customerId,
+    customerName,
+    applyConversationsUpdate,
+    cleanupMediaAndCall,
+    createManagerForCall,
+    fetchConversationMessages,
+  ]);
 
   // Mark conversation as read on select
   const handleSelectConversation = (id: string) => {
     setSelectedConversationId(id);
     setMobilePane('chat');
+    setActionNotice(null);
     const target = conversations.find((c) => c.id === id);
     if (target && target.unreadCount > 0) {
-      updateConversationInState({ ...target, unreadCount: 0 });
-      SupportService.updateConversation(id, { unreadCount: 0 });
+      applyConversationsUpdate((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, unreadCount: 0 } : c))
+      );
+      SupportService.markRead(id).catch(() => {});
+      SupportService.updateConversation(id, { unreadCount: 0 }).catch(() => {});
     }
   };
 
-  // Start or open conversation with a specific staff member
+  // Start or open conversation when clicking a specialist card
   const handleSelectStaffMember = async (agent: SupportAgent) => {
     const existing = customerConversations.find((c) => c.agent.id === agent.id);
     if (existing) {
@@ -252,166 +562,558 @@ export const SupportView: React.FC<SupportViewProps> = ({
     }
 
     const res = await SupportService.createConversation({
-      customerId,
-      customerName,
-      customerTier,
-      agent,
       category: 'General Support',
       subject: `Private Consultation with ${agent.name}`,
-      initialMessage: `Consultation channel initialized with ${agent.name} (${agent.department}).`
-    });
-
-    if (res.success && res.data) {
-      const updated = [res.data, ...conversations];
-      setConversations(updated);
-      onUpdateConversations?.(updated);
-      setSelectedConversationId(res.data.id);
-      setMobilePane('chat');
-    }
-  };
-
-  // Send Message from Customer
-  const handleSendMessage = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!inputText.trim() || !activeConversation) return;
-
-    const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const userPrompt = inputText.trim();
-
-    const newMsg: SupportMessage = {
-      id: `m-${Date.now()}`,
-      conversationId: activeConversation.id,
-      sender: 'customer',
-      text: userPrompt,
-      timestamp: timeNow,
-      status: 'sent'
-    };
-
-    setInputText('');
-
-    const updated: SupportConversation = {
-      ...activeConversation,
-      messages: [...activeConversation.messages, newMsg],
-      lastMessage: newMsg.text,
-      lastMessageTimestamp: timeNow,
-      unreadCount: 0
-    };
-    updateConversationInState(updated);
-
-    await SupportService.sendMessage(activeConversation.id, newMsg);
-    ablyService.publishMessage(activeConversation.id, newMsg);
-
-    // Real-time staff response hook via service
-    ablyService.simulateStaffReply(
-      activeConversation.id,
-      activeConversation.agent,
-      userPrompt,
-      (reply) => {
-        setConversations((prev) => {
-          const fresh = prev.find((c) => c.id === activeConversation.id);
-          if (fresh && !fresh.messages.some((m) => m.id === reply.id)) {
-            const nextConv = {
-              ...fresh,
-              messages: [...fresh.messages, reply],
-              lastMessage: reply.text,
-              lastMessageTimestamp: reply.timestamp
-            };
-            const nextList = prev.map((c) => (c.id === nextConv.id ? nextConv : c));
-            onUpdateConversations?.(nextList);
-            return nextList;
-          }
-          return prev;
-        });
-      }
-    );
-  };
-
-  // Voice note recording
-  const handleToggleVoiceRecording = async () => {
-    if (!isRecordingVoice) {
-      setIsRecordingVoice(true);
-      setRecordingSeconds(0);
-      recordingTimerRef.current = setInterval(() => {
-        setRecordingSeconds((prev) => prev + 1);
-      }, 1000);
-    } else {
-      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
-      setIsRecordingVoice(false);
-
-      if (recordingSeconds >= 1 && activeConversation) {
-        const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        const voiceMsg: SupportMessage = {
-          id: `m-voice-${Date.now()}`,
-          conversationId: activeConversation.id,
-          sender: 'customer',
-          text: `Voice dispatch (${recordingSeconds}s)`,
-          timestamp: timeNow,
-          status: 'sent',
-          voiceNote: {
-            durationSeconds: recordingSeconds,
-            waveform: [40, 80, 60, 100, 70, 50, 90, 80, 60, 40, 65, 85, 50, 30]
-          }
-        };
-
-        await SupportService.sendMessage(activeConversation.id, voiceMsg);
-        ablyService.publishMessage(activeConversation.id, voiceMsg);
-        updateConversationInState({
-          ...activeConversation,
-          messages: [...activeConversation.messages, voiceMsg],
-          lastMessage: `Voice note (${recordingSeconds}s)`,
-          lastMessageTimestamp: timeNow
-        });
-      }
-    }
-  };
-
-  // New Inquiry Flow completion
-  const handleStartInquiry = async (params: {
-    category: InquiryCategory;
-    subject: string;
-    initialMessage: string;
-    agentId: string;
-  }) => {
-    const targetAgent = staff.find((s) => s.id === params.agentId) || staff[0];
-    if (!targetAgent) return;
-
-    const res = await SupportService.createConversation({
-      customerId,
-      customerName,
-      customerTier,
-      agent: targetAgent,
-      category: params.category,
-      subject: params.subject,
-      initialMessage: params.initialMessage
+      initialMessage: `Hello ${agent.name}, I would like to initiate a consultation.`,
+      preferredStaffId: agent.id,
     });
 
     if (res.success && res.data) {
       const newConv = res.data;
-      const nextList = [newConv, ...conversations];
-      setConversations(nextList);
-      onUpdateConversations?.(nextList);
+      applyConversationsUpdate((prev) =>
+        prev.some((c) => c.id === newConv.id) ? prev : [newConv, ...prev]
+      );
+      setSelectedConversationId(newConv.id);
+      setMobilePane('chat');
+      setActionNotice(null);
+    } else {
+      setActionNotice({
+        type: 'error',
+        text: res.error?.message || 'Unable to start conversation with backend server.',
+      });
+    }
+  };
+
+  const handleInputTextChange = (val: string) => {
+    setInputText(val);
+    if (!activeConversation) return;
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+
+    if (val.trim().length > 0) {
+      SupportService.sendTyping(activeConversation.id, true).catch(() => {});
+      typingTimeoutRef.current = setTimeout(() => {
+        SupportService.sendTyping(activeConversation.id, false).catch(() => {});
+      }, 2500);
+    } else {
+      SupportService.sendTyping(activeConversation.id, false).catch(() => {});
+    }
+  };
+
+  const dispatchMessagePayload = async (
+    convId: string,
+    optimisticMsg: SupportMessage,
+    payload: {
+      text: string;
+      type?: 'text' | 'attachment' | 'voice';
+      attachmentId?: string;
+      attachment?: SupportMessage['attachment'];
+      voiceNote?: SupportMessage['voiceNote'];
+      clientTempId: string;
+    }
+  ) => {
+    const res = await SupportService.sendMessage(convId, payload);
+    if (res.success && res.data) {
+      const confirmed = res.data;
+      applyConversationsUpdate((prev) =>
+        prev.map((c) => {
+          if (c.id !== convId) return c;
+          const nextMsgs = appendOrReconcileMessage(c.messages, {
+            ...confirmed,
+            clientTempId: confirmed.clientTempId || payload.clientTempId,
+          });
+          return {
+            ...c,
+            messages: nextMsgs,
+            lastMessage: confirmed.text,
+            lastMessageTimestamp: confirmed.timestamp,
+          };
+        })
+      );
+    } else {
+      applyConversationsUpdate((prev) =>
+        prev.map((c) =>
+          c.id === convId
+            ? {
+                ...c,
+                messages: c.messages.map((m) =>
+                  m.id === optimisticMsg.id || m.clientTempId === payload.clientTempId
+                    ? {
+                        ...m,
+                        pending: false,
+                        failed: true,
+                        errorMessage:
+                          res.error?.message || 'Message failed to send. Tap Retry.',
+                      }
+                    : m
+                ),
+              }
+            : c
+        )
+      );
+    }
+  };
+
+  // Send Message from Customer (Express persists first, Ably distributes after)
+  const handleSendMessage = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!inputText.trim() || !activeConversation) return;
+
+    const convId = activeConversation.id;
+    const text = inputText.trim();
+    const clientTempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    const optimisticMsg: SupportMessage = {
+      id: clientTempId,
+      clientTempId,
+      conversationId: convId,
+      sender: 'customer',
+      text,
+      timestamp: timeNow,
+      status: 'sent',
+      type: 'text',
+      pending: true,
+      failed: false,
+    };
+
+    setInputText('');
+    setActionNotice(null);
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    SupportService.sendTyping(convId, false).catch(() => {});
+
+    applyConversationsUpdate((prev) =>
+      prev.map((c) =>
+        c.id === convId
+          ? {
+              ...c,
+              messages: [...c.messages, optimisticMsg],
+              lastMessage: text,
+              lastMessageTimestamp: timeNow,
+              unreadCount: 0,
+            }
+          : c
+      )
+    );
+
+    await dispatchMessagePayload(convId, optimisticMsg, {
+      text,
+      type: 'text',
+      clientTempId,
+    });
+  };
+
+  const handleRetryFailedMessage = async (failedMsg: SupportMessage) => {
+    if (!activeConversation) return;
+    const convId = activeConversation.id;
+    const clientTempId = failedMsg.clientTempId || failedMsg.id;
+
+    applyConversationsUpdate((prev) =>
+      prev.map((c) =>
+        c.id === convId
+          ? {
+              ...c,
+              messages: c.messages.map((m) =>
+                m.id === failedMsg.id ? { ...m, pending: true, failed: false, errorMessage: undefined } : m
+              ),
+            }
+          : c
+      )
+    );
+
+    await dispatchMessagePayload(convId, failedMsg, {
+      text: failedMsg.text,
+      type: failedMsg.type === 'attachment' || failedMsg.type === 'voice' ? failedMsg.type : 'text',
+      attachmentId: failedMsg.attachmentId,
+      attachment: failedMsg.attachment,
+      voiceNote: failedMsg.voiceNote,
+      clientTempId,
+    });
+  };
+
+  // Real File Attachment Upload
+  const handleFileAttachmentSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !activeConversation) return;
+
+    const convId = activeConversation.id;
+    setUploadingAttachment(true);
+    setActionNotice(null);
+    try {
+      const uploadRes = await SupportService.uploadAttachment(convId, file, {
+        fileName: file.name,
+        type: 'attachment',
+      });
+      if (!uploadRes.success || !uploadRes.data?.attachment) {
+        setActionNotice({
+          type: 'error',
+          text: uploadRes.error?.message || 'Attachment upload failed.',
+        });
+        return;
+      }
+
+      const { attachmentId, attachment } = uploadRes.data;
+      const clientTempId = `tmp-att-${Date.now()}`;
+      const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const text = `Attached document: ${attachment.name}`;
+      const optimisticMsg: SupportMessage = {
+        id: clientTempId,
+        clientTempId,
+        conversationId: convId,
+        sender: 'customer',
+        text,
+        timestamp: timeNow,
+        status: 'sent',
+        type: 'attachment',
+        attachmentId,
+        attachment,
+        pending: true,
+      };
+
+      applyConversationsUpdate((prev) =>
+        prev.map((c) =>
+          c.id === convId
+            ? {
+                ...c,
+                messages: [...c.messages, optimisticMsg],
+                lastMessage: text,
+                lastMessageTimestamp: timeNow,
+              }
+            : c
+        )
+      );
+
+      await dispatchMessagePayload(convId, optimisticMsg, {
+        text,
+        type: 'attachment',
+        attachmentId,
+        attachment,
+        clientTempId,
+      });
+    } finally {
+      setUploadingAttachment(false);
+    }
+  };
+
+  // Protected Attachment Download via Signed URL
+  const handleOpenAttachment = async (msg: SupportMessage) => {
+    const attachmentId = msg.attachmentId || msg.attachment?.attachmentId || msg.attachment?.id;
+    let targetUrl = msg.attachment?.url && isSafeMediaUrl(msg.attachment.url) ? msg.attachment.url : undefined;
+
+    if (attachmentId) {
+      const res = await SupportService.getAttachmentUrl(attachmentId);
+      if (res.success && res.data?.url) {
+        targetUrl = res.data.url;
+      } else if (!targetUrl) {
+        setActionNotice({
+          type: 'error',
+          text: res.error?.message || 'Unable to generate secure download link for this attachment.',
+        });
+        return;
+      }
+    }
+
+    if (!targetUrl || !isSafeMediaUrl(targetUrl)) {
+      setActionNotice({
+        type: 'error',
+        text: 'No valid download link is attached to this file yet.',
+      });
+      return;
+    }
+
+    const link = document.createElement('a');
+    link.href = targetUrl;
+    link.download = msg.attachment?.name || 'attachment';
+    link.rel = 'noopener noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Real MediaRecorder Voice Note Capture + Playback
+  const handleToggleVoiceRecording = async () => {
+    if (!activeConversation) return;
+
+    if (!isRecordingVoice) {
+      if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+        setActionNotice({
+          type: 'error',
+          text: 'Microphone audio capture is not supported in this browser.',
+        });
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const recorder = new MediaRecorder(stream);
+        audioChunksRef.current = [];
+        recordingSecondsRef.current = 0;
+
+        recorder.ondataavailable = (ev) => {
+          if (ev.data.size > 0) audioChunksRef.current.push(ev.data);
+        };
+
+        recorder.start();
+        mediaRecorderRef.current = recorder;
+        setRecordingSeconds(0);
+        setIsRecordingVoice(true);
+        setActionNotice(null);
+
+        recordingTimerRef.current = setInterval(() => {
+          recordingSecondsRef.current += 1;
+          setRecordingSeconds(recordingSecondsRef.current);
+        }, 1000);
+      } catch {
+        setActionNotice({
+          type: 'error',
+          text: 'Microphone permission denied or no input device available.',
+        });
+      }
+      return;
+    }
+
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    setIsRecordingVoice(false);
+
+    const convId = activeConversation.id;
+    const duration = Math.max(recordingSecondsRef.current, 1);
+    const recorder = mediaRecorderRef.current;
+    mediaRecorderRef.current = null;
+
+    if (!recorder) return;
+
+    recorder.onstop = async () => {
+      const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+      recorder.stream.getTracks().forEach((t) => t.stop());
+
+      if (blob.size === 0) return;
+
+      const uploadRes = await SupportService.uploadAttachment(convId, blob, {
+        fileName: `voice-dispatch-${Date.now()}.webm`,
+        type: 'voice',
+        durationSeconds: duration,
+      });
+
+      if (!uploadRes.success || !uploadRes.data?.voiceNote) {
+        setActionNotice({
+          type: 'error',
+          text: uploadRes.error?.message || 'Voice note upload failed.',
+        });
+        return;
+      }
+
+      const { attachmentId, voiceNote } = uploadRes.data;
+      const clientTempId = `tmp-voice-${Date.now()}`;
+      const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const text = `Voice dispatch (${duration}s)`;
+      const optimisticMsg: SupportMessage = {
+        id: clientTempId,
+        clientTempId,
+        conversationId: convId,
+        sender: 'customer',
+        text,
+        timestamp: timeNow,
+        status: 'sent',
+        type: 'voice',
+        attachmentId,
+        voiceNote,
+        pending: true,
+      };
+
+      applyConversationsUpdate((prev) =>
+        prev.map((c) =>
+          c.id === convId
+            ? {
+                ...c,
+                messages: [...c.messages, optimisticMsg],
+                lastMessage: text,
+                lastMessageTimestamp: timeNow,
+              }
+            : c
+        )
+      );
+
+      await dispatchMessagePayload(convId, optimisticMsg, {
+        text,
+        type: 'voice',
+        attachmentId,
+        voiceNote,
+        clientTempId,
+      });
+    };
+
+    try {
+      recorder.stop();
+    } catch {
+      recorder.stream.getTracks().forEach((t) => t.stop());
+    }
+  };
+
+  const handleToggleVoicePlayback = async (msg: SupportMessage) => {
+    if (playingVoiceId === msg.id) {
+      audioPlayerRef.current?.pause();
+      setPlayingVoiceId(null);
+      return;
+    }
+
+    const attachmentId = msg.attachmentId || msg.voiceNote?.attachmentId || msg.voiceNote?.id;
+    let audioUrl =
+      msg.voiceNote?.audioUrl && isSafeMediaUrl(msg.voiceNote.audioUrl)
+        ? msg.voiceNote.audioUrl
+        : undefined;
+
+    if (attachmentId) {
+      const res = await SupportService.getAttachmentUrl(attachmentId);
+      if (res.success && res.data?.url) {
+        audioUrl = res.data.url;
+      }
+    }
+
+    if (!audioUrl || !isSafeMediaUrl(audioUrl)) {
+      setActionNotice({
+        type: 'error',
+        text: 'Audio playback URL is unavailable for this voice note.',
+      });
+      return;
+    }
+
+    if (audioPlayerRef.current) {
+      audioPlayerRef.current.pause();
+    }
+
+    const audio = new Audio(audioUrl);
+    audioPlayerRef.current = audio;
+    setPlayingVoiceId(msg.id);
+    audio.onended = () => setPlayingVoiceId(null);
+    audio.onerror = () => {
+      setPlayingVoiceId(null);
+      setActionNotice({
+        type: 'error',
+        text: 'Unable to decode or stream voice note audio.',
+      });
+    };
+    audio.play().catch(() => {
+      setPlayingVoiceId(null);
+    });
+  };
+
+  // Real WebRTC Call Lifecycle Handlers
+  const handleStartCall = async (type: SupportCallType) => {
+    if (!activeConversation) return;
+    setCallError(null);
+
+    const res = await SupportService.startCall(activeConversation.id, type);
+    if (!res.success || !res.data) {
+      setActionNotice({
+        type: 'error',
+        text: res.error?.message || 'Unable to start encrypted call session.',
+      });
+      return;
+    }
+
+    const call = res.data;
+    createManagerForCall(call);
+    setActiveCall(call);
+    setCallPhase('outgoing_ringing');
+  };
+
+  const handleAcceptIncomingCall = async () => {
+    if (!activeCall) return;
+    setCallError(null);
+    const manager = createManagerForCall(activeCall);
+    try {
+      await manager.initPeer(true);
+    } catch (err: any) {
+      setCallPhase('error');
+      setCallError(err?.message || 'Microphone/camera access is required to accept the call.');
+      return;
+    }
+
+    const res = await SupportService.acceptCall(activeCall.id);
+    if (res.success && res.data) {
+      setActiveCall(res.data);
+      setCallPhase('connecting');
+    } else {
+      cleanupMediaAndCall();
+      setCallPhase('error');
+      setCallError(res.error?.message || 'Failed to accept call on backend.');
+    }
+  };
+
+  const handleRejectIncomingCall = async () => {
+    if (!activeCall) return;
+    await SupportService.rejectCall(activeCall.id).catch(() => {});
+    cleanupMediaAndCall();
+    setActiveCall(null);
+    setCallPhase('ended');
+  };
+
+  const handleEndActiveCall = async () => {
+    const call = activeCall;
+    cleanupMediaAndCall();
+    setActiveCall(null);
+    setCallPhase('ended');
+    if (call?.id) {
+      await SupportService.endCall(call.id).catch(() => {});
+    }
+  };
+
+  // End Support Session (Customer)
+  const handleConfirmEndSession = async () => {
+    if (!activeConversation || isEndingSession) return;
+    const convId = activeConversation.id;
+    setIsEndingSession(true);
+    setEndSessionError(null);
+
+    try {
+      const res = await SupportService.endSession(convId);
+      if (res.success) {
+        setShowEndSessionModal(false);
+        cleanupMediaAndCall();
+        setActiveCall(null);
+        applyConversationsUpdate((prev) => prev.filter((c) => c.id !== convId));
+        setSelectedConversationId('');
+        setActionNotice({
+          type: 'info',
+          text: 'Support session ended cleanly. You can initiate a new inquiry anytime.',
+        });
+      } else {
+        setEndSessionError(
+          res.error?.message || 'Unable to close support session on backend.'
+        );
+      }
+    } finally {
+      setIsEndingSession(false);
+    }
+  };
+
+  // New Inquiry Flow completion (POST /api/support/conversations)
+  const handleStartInquiry = async (params: {
+    category: InquiryCategory;
+    subject: string;
+    initialMessage: string;
+    preferredStaffId?: string;
+  }): Promise<{ ok: boolean; error?: string }> => {
+    const res = await SupportService.createConversation(params);
+
+    if (res.success && res.data) {
+      const newConv = res.data;
+      applyConversationsUpdate((prev) =>
+        prev.some((c) => c.id === newConv.id) ? prev : [newConv, ...prev]
+      );
       setSelectedConversationId(newConv.id);
       setActiveSubTab('chat');
       setMobilePane('chat');
-
-      ablyService.simulateStaffReply(newConv.id, targetAgent, params.initialMessage, (reply) => {
-        setConversations((prev) => {
-          const fresh = prev.find((c) => c.id === newConv.id);
-          if (fresh && !fresh.messages.some((m) => m.id === reply.id)) {
-            const nextConv = {
-              ...fresh,
-              messages: [...fresh.messages, reply],
-              lastMessage: reply.text,
-              lastMessageTimestamp: reply.timestamp
-            };
-            const updated = prev.map((c) => (c.id === nextConv.id ? nextConv : c));
-            onUpdateConversations?.(updated);
-            return updated;
-          }
-          return prev;
-        });
-      });
+      setActionNotice(null);
+      return { ok: true };
     }
+
+    return {
+      ok: false,
+      error: res.error?.message || 'Failed to create inquiry on backend.',
+    };
   };
 
   // Create Ticket Submit
@@ -428,17 +1130,21 @@ export const SupportView: React.FC<SupportViewProps> = ({
       assignedAgentId: assigned?.id,
       customerId,
       customerName,
-      description: newTicketDesc.trim()
+      description: newTicketDesc.trim(),
     });
 
     if (res.success && res.data) {
       setTickets((prev) => [res.data!, ...prev]);
       onCreateTicket?.(res.data);
+      setShowCreateTicketModal(false);
+      setNewTicketSubject('');
+      setNewTicketDesc('');
+    } else {
+      setActionNotice({
+        type: 'error',
+        text: res.error?.message || 'Unable to submit support ticket.',
+      });
     }
-
-    setShowCreateTicketModal(false);
-    setNewTicketSubject('');
-    setNewTicketDesc('');
   };
 
   // Filtered inner sidebar lists
@@ -772,7 +1478,11 @@ export const SupportView: React.FC<SupportViewProps> = ({
                         <span>{filteredConversations.length}</span>
                       </div>
 
-                      {filteredConversations.length === 0 ? (
+                      {isLoadingConversations ? (
+                        <div className="p-4 text-center text-xs text-neutral-500">
+                          Loading active conversations...
+                        </div>
+                      ) : filteredConversations.length === 0 ? (
                         <div className="p-4 text-center text-xs text-neutral-500">
                           No matching conversations.
                         </div>
@@ -826,12 +1536,12 @@ export const SupportView: React.FC<SupportViewProps> = ({
                                     className={`px-1.5 py-0.2 rounded capitalize ${
                                       conv.status === 'active'
                                         ? 'bg-emerald-500/10 text-emerald-500'
-                                        : conv.status === 'pending'
+                                        : conv.status === 'waiting' || conv.status === 'pending'
                                         ? 'bg-amber-500/10 text-amber-500'
                                         : 'bg-sky-500/10 text-sky-500'
                                     }`}
                                   >
-                                    {conv.status}
+                                    {conv.status === 'waiting' ? 'In Queue' : conv.status}
                                   </span>
                                   {conv.linkedTicketId && (
                                     <span className="font-mono text-neutral-500">{conv.linkedTicketId}</span>
@@ -1100,29 +1810,103 @@ export const SupportView: React.FC<SupportViewProps> = ({
                   <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
                     <button
                       type="button"
-                      onClick={() => setShowCallModal(true)}
+                      onClick={() => handleStartCall('audio')}
                       className={`p-1.5 sm:p-2 rounded-xl border text-neutral-400 hover:text-emerald-500 transition-colors cursor-pointer ${
                         isLight ? 'border-slate-200 hover:bg-slate-100' : 'border-neutral-800 hover:bg-neutral-800'
                       }`}
                       title="Encrypted Voice Call"
+                      aria-label="Encrypted Voice Call"
                     >
                       <Phone className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     </button>
                     <button
                       type="button"
-                      onClick={() => setShowCallModal(true)}
+                      onClick={() => handleStartCall('video')}
                       className={`p-1.5 sm:p-2 rounded-xl border text-neutral-400 hover:text-emerald-500 transition-colors cursor-pointer ${
                         isLight ? 'border-slate-200 hover:bg-slate-100' : 'border-neutral-800 hover:bg-neutral-800'
                       }`}
                       title="Video Consultation"
+                      aria-label="Video Consultation"
                     >
                       <Video className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEndSessionError(null);
+                        setShowEndSessionModal(true);
+                      }}
+                      className={`px-2 sm:px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer ${
+                        isLight
+                          ? 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100'
+                          : 'border-rose-500/30 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20'
+                      }`}
+                      title="End Support Session"
+                    >
+                      <LogOut className="w-3.5 h-3.5 shrink-0" />
+                      <span className="hidden sm:inline">End Session</span>
                     </button>
                   </div>
                 </div>
 
+                {/* Waiting Queue Banner */}
+                {activeConversation.status === 'waiting' && (
+                  <div
+                    className={`px-3 sm:px-4 py-2 border-b text-xs flex items-center justify-between gap-2 shrink-0 ${
+                      isLight
+                        ? 'bg-amber-50 border-amber-200 text-amber-900'
+                        : 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Clock className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                      <span className="truncate">
+                        Waiting in priority queue for the next available online specialist
+                        {typeof activeConversation.queuePosition === 'number'
+                          ? ` (Position #${activeConversation.queuePosition})`
+                          : ''}
+                        . You can still leave details below.
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Inline Notice / Error Banner */}
+                {actionNotice && (
+                  <div
+                    className={`px-3 sm:px-4 py-2 border-b text-xs flex items-center justify-between gap-2 shrink-0 ${
+                      actionNotice.type === 'error'
+                        ? isLight
+                          ? 'bg-rose-50 border-rose-200 text-rose-800'
+                          : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                        : isLight
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                        : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate">{actionNotice.text}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActionNotice(null)}
+                      className="p-0.5 opacity-70 hover:opacity-100 cursor-pointer shrink-0"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+
                 {/* Independently Scrollable Messages Feed */}
                 <div className="flex-1 min-h-0 p-3 sm:p-5 overflow-y-auto space-y-3.5 sm:space-y-4">
+                  {isLoadingMessages && activeConversation.messages.length === 0 && (
+                    <div className="flex items-center justify-center gap-2 py-8 text-xs text-neutral-400">
+                      <Loader2 className="w-4 h-4 animate-spin text-emerald-500" />
+                      <span>Synchronizing conversation history...</span>
+                    </div>
+                  )}
+
                   {activeConversation.messages.map((msg) => {
                     const isClient = msg.sender === 'customer';
                     const isSystem = msg.sender === 'system';
@@ -1153,7 +1937,9 @@ export const SupportView: React.FC<SupportViewProps> = ({
 
                         <div
                           className={`max-w-[88%] sm:max-w-[78%] rounded-2xl p-2.5 sm:p-3 text-xs leading-relaxed shadow-sm break-words ${
-                            isClient
+                            msg.failed
+                              ? 'bg-rose-950/70 border border-rose-500/50 text-rose-100 rounded-br-xs'
+                              : isClient
                               ? 'bg-emerald-600 text-neutral-950 font-medium rounded-br-xs'
                               : isLight
                               ? 'bg-slate-100 text-slate-900 border border-slate-200 rounded-bl-xs'
@@ -1163,18 +1949,27 @@ export const SupportView: React.FC<SupportViewProps> = ({
                           <p className="whitespace-pre-line">{msg.text}</p>
 
                           {msg.attachment && (
-                            <div className="mt-2 pt-2 border-t border-black/10 flex items-center gap-2 text-[11px]">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenAttachment(msg)}
+                              className="mt-2 pt-2 border-t border-black/15 flex items-center gap-2 text-[11px] w-full text-left hover:opacity-80 cursor-pointer"
+                            >
                               <FileText className="w-4 h-4 shrink-0" />
-                              <span className="font-semibold underline truncate">{msg.attachment.name}</span>
-                              <span className="opacity-70">({msg.attachment.size})</span>
-                            </div>
+                              <span className="font-semibold underline truncate flex-1">
+                                {msg.attachment.name}
+                              </span>
+                              {msg.attachment.size && (
+                                <span className="opacity-70 shrink-0">({msg.attachment.size})</span>
+                              )}
+                              <Download className="w-3.5 h-3.5 shrink-0" />
+                            </button>
                           )}
 
                           {msg.voiceNote && (
                             <div className="mt-2 p-2 rounded-xl bg-black/15 flex items-center gap-2.5">
                               <button
                                 type="button"
-                                onClick={() => setPlayingVoiceId(playingVoiceId === msg.id ? null : msg.id)}
+                                onClick={() => handleToggleVoicePlayback(msg)}
                                 className="w-7 h-7 rounded-full bg-emerald-500 text-neutral-950 flex items-center justify-center shrink-0 cursor-pointer"
                               >
                                 {playingVoiceId === msg.id ? (
@@ -1186,21 +1981,54 @@ export const SupportView: React.FC<SupportViewProps> = ({
                               <div className="flex-1">
                                 <div className="h-1.5 bg-black/20 rounded-full overflow-hidden">
                                   <div
-                                    className={`h-full bg-emerald-300 rounded-full ${
-                                      playingVoiceId === msg.id ? 'w-full transition-all duration-3000' : 'w-1/3'
+                                    className={`h-full bg-emerald-300 rounded-full transition-all ${
+                                      playingVoiceId === msg.id ? 'w-full animate-pulse' : 'w-1/3'
                                     }`}
                                   />
                                 </div>
                               </div>
-                              <span className="font-mono text-[10px]">{msg.voiceNote.durationSeconds}s</span>
+                              <span className="font-mono text-[10px]">
+                                {msg.voiceNote.durationSeconds}s
+                              </span>
                             </div>
                           )}
                         </div>
 
                         {isClient && (
-                          <div className="flex items-center gap-1 mt-0.5 text-[10px] text-neutral-500 font-mono">
-                            <CheckCheck className="w-3 h-3 text-emerald-500" />
-                            <span>{msg.status}</span>
+                          <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-neutral-500 font-mono">
+                            {msg.failed ? (
+                              <>
+                                <span className="text-rose-400">
+                                  {msg.errorMessage || 'Failed to send'}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRetryFailedMessage(msg)}
+                                  className="text-emerald-400 hover:underline flex items-center gap-0.5 cursor-pointer"
+                                >
+                                  <RotateCcw className="w-2.5 h-2.5" />
+                                  <span>Retry</span>
+                                </button>
+                              </>
+                            ) : msg.pending ? (
+                              <>
+                                <Loader2 className="w-3 h-3 animate-spin text-emerald-500" />
+                                <span>sending</span>
+                              </>
+                            ) : (
+                              <>
+                                {msg.status === 'sent' ? (
+                                  <Check className="w-3 h-3 text-neutral-400" />
+                                ) : (
+                                  <CheckCheck
+                                    className={`w-3 h-3 ${
+                                      msg.status === 'read' ? 'text-emerald-400' : 'text-neutral-400'
+                                    }`}
+                                  />
+                                )}
+                                <span>{msg.status}</span>
+                              </>
+                            )}
                           </div>
                         )}
                       </div>
@@ -1229,20 +2057,37 @@ export const SupportView: React.FC<SupportViewProps> = ({
                 >
                   <form onSubmit={handleSendMessage} className="space-y-1.5 sm:space-y-2">
                     <div className="flex items-center gap-1.5 sm:gap-2">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        className="hidden"
+                        onChange={handleFileAttachmentSelected}
+                      />
+
                       <button
                         type="button"
+                        disabled={uploadingAttachment}
+                        onClick={() => fileInputRef.current?.click()}
                         title="Attach Document"
-                        className={`p-1.5 sm:p-2 rounded-xl text-neutral-400 hover:text-neutral-200 transition-colors cursor-pointer shrink-0 ${
+                        className={`p-1.5 sm:p-2 rounded-xl text-neutral-400 hover:text-neutral-200 transition-colors cursor-pointer shrink-0 disabled:opacity-40 ${
                           isLight ? 'hover:bg-slate-200 hover:text-slate-700' : 'hover:bg-neutral-800'
                         }`}
                       >
-                        <Paperclip className="w-4 h-4" />
+                        {uploadingAttachment ? (
+                          <Loader2 className="w-4 h-4 animate-spin text-emerald-500" />
+                        ) : (
+                          <Paperclip className="w-4 h-4" />
+                        )}
                       </button>
 
                       <button
                         type="button"
                         onClick={handleToggleVoiceRecording}
-                        title={isRecordingVoice ? 'Stop and send voice dispatch' : 'Record Voice Note'}
+                        title={
+                          isRecordingVoice
+                            ? `Stop & send voice dispatch (${recordingSeconds}s)`
+                            : 'Record Voice Note'
+                        }
                         className={`p-1.5 sm:p-2 rounded-xl transition-all cursor-pointer shrink-0 ${
                           isRecordingVoice
                             ? 'bg-rose-500 text-white animate-pulse'
@@ -1251,18 +2096,24 @@ export const SupportView: React.FC<SupportViewProps> = ({
                             : 'text-neutral-400 hover:bg-neutral-800'
                         }`}
                       >
-                        <Mic className="w-4 h-4" />
+                        {isRecordingVoice ? (
+                          <Square className="w-4 h-4" />
+                        ) : (
+                          <Mic className="w-4 h-4" />
+                        )}
                       </button>
 
                       <input
                         type="text"
                         placeholder={
                           isRecordingVoice
-                            ? `Recording (${recordingSeconds}s)...`
+                            ? `Recording (${recordingSeconds}s)... tap stop to send`
+                            : activeConversation.status === 'waiting'
+                            ? 'Send details while waiting for specialist assignment...'
                             : `Message ${activeConversation.agent.name}...`
                         }
                         value={inputText}
-                        onChange={(e) => setInputText(e.target.value)}
+                        onChange={(e) => handleInputTextChange(e.target.value)}
                         className={`flex-1 min-w-0 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl border text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500 transition-colors ${
                           isLight
                             ? 'bg-white border-slate-300 text-slate-900'
@@ -1293,17 +2144,38 @@ export const SupportView: React.FC<SupportViewProps> = ({
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center text-neutral-400 p-6 sm:p-8 space-y-3 text-center">
                 <Headphones className="w-11 h-11 text-emerald-500/40" />
-                <p className="text-sm font-medium">Select a private banking specialist to begin</p>
-                <div className="flex flex-wrap items-center justify-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setMobilePane('list')}
-                    className={`lg:hidden px-4 py-2 rounded-xl border font-semibold text-xs cursor-pointer ${
-                      isLight ? 'border-slate-300 bg-slate-100 text-slate-800' : 'border-neutral-700 bg-neutral-800 text-neutral-100'
+                {actionNotice && (
+                  <div
+                    className={`max-w-md px-3.5 py-2 rounded-xl border text-xs ${
+                      actionNotice.type === 'error'
+                        ? isLight
+                          ? 'bg-rose-50 border-rose-200 text-rose-800'
+                          : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                        : isLight
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                        : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
                     }`}
                   >
-                    Browse Specialists
-                  </button>
+                    {actionNotice.text}
+                  </div>
+                )}
+                <p className="text-sm font-medium">
+                  {customerConversations.length === 0
+                    ? 'No active support session — start a new inquiry to connect with a specialist'
+                    : 'Select a private banking specialist to begin'}
+                </p>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  {customerConversations.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setMobilePane('list')}
+                      className={`lg:hidden px-4 py-2 rounded-xl border font-semibold text-xs cursor-pointer ${
+                        isLight ? 'border-slate-300 bg-slate-100 text-slate-800' : 'border-neutral-700 bg-neutral-800 text-neutral-100'
+                      }`}
+                    >
+                      Browse Specialists
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setShowWelcomeModal(true)}
@@ -1498,54 +2370,40 @@ export const SupportView: React.FC<SupportViewProps> = ({
         theme={theme}
       />
 
-      {/* Audio / Video Calling Modal Placeholder */}
-      {showCallModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
-          <div
-            className={`w-full max-w-md rounded-2xl border p-6 space-y-4 shadow-2xl ${
-              isLight
-                ? 'border-slate-200 bg-white text-slate-900'
-                : 'border-neutral-800 bg-neutral-900 text-neutral-100'
-            }`}
-          >
-            <div className="flex items-center justify-between border-b border-neutral-800/30 pb-3">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-5 h-5 text-emerald-500" />
-                <h4 className="text-sm font-semibold">Sovereign Voice & Video Bridge</h4>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowCallModal(false)}
-                className="p-1 rounded-lg text-neutral-400 hover:text-neutral-200"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {/* Real-Time WebRTC Audio / Video Call Overlay */}
+      <SupportCallOverlay
+        call={activeCall}
+        phase={callPhase}
+        peerName={activeConversation?.agent.name || activeCall?.initiatorName || 'Support Specialist'}
+        errorDetail={callError}
+        localStream={localStream}
+        remoteStream={remoteStream}
+        onAccept={handleAcceptIncomingCall}
+        onReject={handleRejectIncomingCall}
+        onEnd={handleEndActiveCall}
+        onDismiss={() => {
+          cleanupMediaAndCall();
+          setActiveCall(null);
+        }}
+        onToggleMute={(muted) => callManagerRef.current?.setMuted(muted)}
+        onToggleVideo={(enabled) => callManagerRef.current?.setVideoEnabled(enabled)}
+        theme={theme}
+      />
 
-            <div
-              className={`p-4 rounded-xl border space-y-2 text-xs ${
-                isLight ? 'bg-slate-50 border-slate-200' : 'bg-neutral-950 border-neutral-800'
-              }`}
-            >
-              <div className="text-emerald-500 font-mono font-semibold">Ready for WebRTC / SIP Bridge</div>
-              <p className="text-neutral-400 leading-relaxed">
-                Calling infrastructure is pre-architected for end-to-end encrypted voice & video consults.
-                Requires secondary hardware key token signing before opening live audio channel.
-              </p>
-            </div>
-
-            <div className="flex justify-end pt-2">
-              <button
-                type="button"
-                onClick={() => setShowCallModal(false)}
-                className="px-4 py-2 rounded-xl bg-emerald-500 text-neutral-950 font-semibold text-xs hover:bg-emerald-400 cursor-pointer"
-              >
-                Acknowledge
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* End Session Confirmation Modal */}
+      <EndSessionConfirmModal
+        isOpen={showEndSessionModal}
+        subject={activeConversation?.subject}
+        isSubmitting={isEndingSession}
+        errorMessage={endSessionError}
+        role="customer"
+        onCancel={() => {
+          setShowEndSessionModal(false);
+          setEndSessionError(null);
+        }}
+        onConfirm={handleConfirmEndSession}
+        theme={theme}
+      />
 
       {/* Create Ticket Modal */}
       {showCreateTicketModal && (

@@ -1,15 +1,26 @@
 /**
- * Aureus Wealth - Ably Real-Time Support Messaging Service
- * 
- * Supports both:
- * 1. Live Ably Realtime protocol when `VITE_ABLY_KEY` or `VITE_ABLY_AUTH_URL` is provided.
- * 2. High-fidelity in-browser real-time presence & event pipeline fallback
- *    so multi-agent messaging, typing indicators, read receipts, and presence
- *    work seamlessly out of the box in the preview without requiring external credentials.
+ * Aureus Wealth - Customer Ably Real-Time Support Service
+ *
+ * Uses backend-issued Ably TokenRequests (`GET /api/ably/token?conversationId=...` with HTTP-only cookies).
+ * Never stores tokens in localStorage, never exposes Ably API secrets on client, and never simulates replies.
  */
 
 import * as Ably from 'ably';
-import { SupportMessage, StaffAvailability, SupportAgent } from '../types/support';
+import { API_BASE_URL } from './apiClient';
+import {
+  normalizeConversationStatus,
+  normalizeSupportAgent,
+  normalizeSupportMessage,
+  normalizeCallSession,
+} from './supportService';
+import {
+  SupportMessage,
+  StaffAvailability,
+  SupportConversationStatus,
+  SupportAgent,
+  SupportCallSession,
+  SupportCallSignalPayload,
+} from '../types/support';
 
 export interface AblyPresenceMember {
   clientId: string;
@@ -21,283 +32,294 @@ export interface AblyPresenceMember {
   };
 }
 
-export type AblyMessageHandler = (message: SupportMessage) => void;
-export type AblyTypingHandler = (agentIdOrCustomerId: string, isTyping: boolean, name?: string) => void;
-export type AblyPresenceHandler = (presence: AblyPresenceMember[]) => void;
-export type AblyReceiptHandler = (messageId: string, status: 'delivered' | 'read') => void;
+export type CustomerRealtimeStatus =
+  | 'idle'
+  | 'connecting'
+  | 'connected'
+  | 'disconnected'
+  | 'unavailable';
+
+export interface CustomerConversationRealtimeHandlers {
+  onMessageNew?: (message: SupportMessage) => void;
+  onTyping?: (userId: string, isTyping: boolean, name?: string) => void;
+  onReceipt?: (messageId: string, status: 'delivered' | 'read') => void;
+  onPresence?: (members: AblyPresenceMember[]) => void;
+  onConversationUpdated?: (patch: {
+    conversationId: string;
+    status?: SupportConversationStatus;
+    agent?: SupportAgent;
+    queuePosition?: number;
+  }) => void;
+  onSessionEnded?: (payload: { conversationId: string; endedAt?: string }) => void;
+  onCallEvent?: (
+    eventType: 'incoming' | 'accepted' | 'rejected' | 'ended',
+    call: SupportCallSession
+  ) => void;
+  onCallSignal?: (signal: SupportCallSignalPayload) => void;
+  onReconnected?: () => void;
+  onStatusChange?: (status: CustomerRealtimeStatus, detail?: string) => void;
+}
 
 class AblySupportService {
-  private realtimeClient: Ably.Realtime | null = null;
-  private isLive = false;
+  private clientsByConv = new Map<string, Ably.Realtime>();
+  private statusByConv = new Map<string, CustomerRealtimeStatus>();
 
-  // Local event bus for resilient zero-config execution
-  private messageListeners = new Map<string, Set<AblyMessageHandler>>();
-  private typingListeners = new Map<string, Set<AblyTypingHandler>>();
-  private presenceListeners = new Map<string, Set<AblyPresenceHandler>>();
-  private receiptListeners = new Map<string, Set<AblyReceiptHandler>>();
-
-  // Active channel presence store
-  private channelPresence = new Map<string, Map<string, AblyPresenceMember>>();
-
-  constructor() {
-    this.initClient();
-  }
-
-  private initClient() {
-    if (typeof window === 'undefined') return;
-
-    const apiKey = import.meta.env.VITE_ABLY_KEY;
-    const authUrl = import.meta.env.VITE_ABLY_AUTH_URL;
-
-    if (apiKey) {
-      try {
-        this.realtimeClient = new Ably.Realtime({ key: apiKey });
-        this.isLive = true;
-      } catch (err) {
-        console.warn('Ably initialization failed, falling back to sovereign in-memory broker:', err);
-        this.isLive = false;
-      }
-    } else if (authUrl) {
-      try {
-        this.realtimeClient = new Ably.Realtime({ authUrl });
-        this.isLive = true;
-      } catch (err) {
-        console.warn('Ably authUrl connection failed:', err);
-        this.isLive = false;
-      }
-    }
-  }
-
-  /**
-   * Channel name format: support:conv-{conversationId}
-   */
   private getChannelName(conversationId: string): string {
     return `support:conv-${conversationId}`;
   }
 
-  /**
-   * Subscribe to new messages for a specific conversation room
-   */
-  public subscribeToMessages(conversationId: string, handler: AblyMessageHandler): () => void {
-    const channelName = this.getChannelName(conversationId);
+  private async fetchTokenRequest(conversationId: string): Promise<Ably.TokenRequest | Ably.TokenDetails> {
+    const query = new URLSearchParams({ conversationId }).toString();
+    const url = `${API_BASE_URL}/ably/token?${query}`;
+    const response = await fetch(url, {
+      method: 'GET',
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    });
 
-    if (!this.messageListeners.has(channelName)) {
-      this.messageListeners.set(channelName, new Set());
-    }
-    this.messageListeners.get(channelName)!.add(handler);
-
-    if (this.isLive && this.realtimeClient) {
-      const channel = this.realtimeClient.channels.get(channelName);
-      channel.subscribe('message:new', (msg: Ably.Message) => {
-        handler(msg.data as SupportMessage);
-      });
+    const contentType = response.headers.get('content-type') || '';
+    if (!response.ok || !contentType.includes('application/json')) {
+      throw new Error(`Ably token endpoint ${url} returned HTTP ${response.status}`);
     }
 
-    return () => {
-      this.messageListeners.get(channelName)?.delete(handler);
-    };
+    const payload = await response.json();
+    return payload?.data || payload;
   }
 
   /**
-   * Publish a message to a conversation room
+   * Connects to Ably using a conversation-scoped TokenRequest and subscribes to
+   * `support:conv-{conversationId}` events + presence with full cleanup.
    */
-  public async publishMessage(conversationId: string, message: SupportMessage): Promise<void> {
-    const channelName = this.getChannelName(conversationId);
-
-    if (this.isLive && this.realtimeClient) {
-      try {
-        const channel = this.realtimeClient.channels.get(channelName);
-        await channel.publish('message:new', message);
-      } catch (err) {
-        console.error('Failed to publish Ably message:', err);
-      }
-    }
-
-    // Broadcast through local pipeline
-    const listeners = this.messageListeners.get(channelName);
-    if (listeners) {
-      listeners.forEach((listener) => {
-        try {
-          listener(message);
-        } catch (e) {
-          console.error(e);
-        }
-      });
-    }
-  }
-
-  /**
-   * Subscribe to typing indicators
-   */
-  public subscribeToTyping(conversationId: string, handler: AblyTypingHandler): () => void {
-    const channelName = this.getChannelName(conversationId);
-
-    if (!this.typingListeners.has(channelName)) {
-      this.typingListeners.set(channelName, new Set());
-    }
-    this.typingListeners.get(channelName)!.add(handler);
-
-    if (this.isLive && this.realtimeClient) {
-      const channel = this.realtimeClient.channels.get(channelName);
-      channel.subscribe('typing', (msg: Ably.Message) => {
-        handler(msg.data.userId, msg.data.isTyping, msg.data.name);
-      });
-    }
-
-    return () => {
-      this.typingListeners.get(channelName)?.delete(handler);
-    };
-  }
-
-  /**
-   * Broadcast typing indicator to conversation room
-   */
-  public async setTyping(
+  public subscribeConversation(
     conversationId: string,
-    userId: string,
-    isTyping: boolean,
-    name?: string
-  ): Promise<void> {
-    const channelName = this.getChannelName(conversationId);
-
-    if (this.isLive && this.realtimeClient) {
-      try {
-        const channel = this.realtimeClient.channels.get(channelName);
-        await channel.publish('typing', { userId, isTyping, name });
-      } catch {}
-    }
-
-    const listeners = this.typingListeners.get(channelName);
-    if (listeners) {
-      listeners.forEach((listener) => {
-        try {
-          listener(userId, isTyping, name);
-        } catch {}
-      });
-    }
-  }
-
-  /**
-   * Read receipts
-   */
-  public subscribeToReceipts(conversationId: string, handler: AblyReceiptHandler): () => void {
-    const channelName = this.getChannelName(conversationId);
-
-    if (!this.receiptListeners.has(channelName)) {
-      this.receiptListeners.set(channelName, new Set());
-    }
-    this.receiptListeners.get(channelName)!.add(handler);
-
-    return () => {
-      this.receiptListeners.get(channelName)?.delete(handler);
-    };
-  }
-
-  public notifyReceipt(conversationId: string, messageId: string, status: 'delivered' | 'read'): void {
-    const channelName = this.getChannelName(conversationId);
-    const listeners = this.receiptListeners.get(channelName);
-    if (listeners) {
-      listeners.forEach((listener) => listener(messageId, status));
-    }
-  }
-
-  /**
-   * Presence: enter room, update status, and leave
-   */
-  public enterPresence(
-    conversationId: string,
-    member: AblyPresenceMember
+    customer: { id: string; name: string },
+    handlers: CustomerConversationRealtimeHandlers
   ): () => void {
+    if (typeof window === 'undefined' || !conversationId || !customer.id) {
+      return () => {};
+    }
+
+    let disposed = false;
+    let hasConnectedOnce = false;
     const channelName = this.getChannelName(conversationId);
 
-    if (!this.channelPresence.has(channelName)) {
-      this.channelPresence.set(channelName, new Map());
-    }
-    this.channelPresence.get(channelName)!.set(member.clientId, member);
+    // Tear down any previous connection for this same conversationId before re-subscribing
+    this.cleanupConversationClient(conversationId);
 
-    this.notifyPresenceChanged(channelName);
+    handlers.onStatusChange?.('connecting');
+    this.statusByConv.set(conversationId, 'connecting');
 
-    return () => {
-      this.channelPresence.get(channelName)?.delete(member.clientId);
-      this.notifyPresenceChanged(channelName);
-    };
-  }
-
-  public subscribeToPresence(conversationId: string, handler: AblyPresenceHandler): () => void {
-    const channelName = this.getChannelName(conversationId);
-
-    if (!this.presenceListeners.has(channelName)) {
-      this.presenceListeners.set(channelName, new Set());
-    }
-    this.presenceListeners.get(channelName)!.add(handler);
-
-    // Initial presence push
-    const members = Array.from(this.channelPresence.get(channelName)?.values() || []);
-    handler(members);
-
-    return () => {
-      this.presenceListeners.get(channelName)?.delete(handler);
-    };
-  }
-
-  private notifyPresenceChanged(channelName: string) {
-    const members = Array.from(this.channelPresence.get(channelName)?.values() || []);
-    const listeners = this.presenceListeners.get(channelName);
-    if (listeners) {
-      listeners.forEach((listener) => {
+    const client = new Ably.Realtime({
+      clientId: customer.id,
+      authCallback: async (_tokenParams, callback) => {
         try {
-          listener(members);
-        } catch {}
+          const tokenRequest = await this.fetchTokenRequest(conversationId);
+          callback(null, tokenRequest as Ably.TokenRequest);
+        } catch (err: any) {
+          const msg = err?.message || 'Unable to obtain Ably token.';
+          this.statusByConv.set(conversationId, 'unavailable');
+          handlers.onStatusChange?.('unavailable', msg);
+          callback(err, null);
+        }
+      },
+    });
+
+    this.clientsByConv.set(conversationId, client);
+
+    const onConnected = () => {
+      if (disposed) return;
+      this.statusByConv.set(conversationId, 'connected');
+      handlers.onStatusChange?.('connected');
+      if (hasConnectedOnce) {
+        handlers.onReconnected?.();
+      }
+      hasConnectedOnce = true;
+    };
+
+    const onDisconnected = () => {
+      if (disposed) return;
+      this.statusByConv.set(conversationId, 'disconnected');
+      handlers.onStatusChange?.('disconnected');
+    };
+
+    const onFailed = (stateChange: Ably.ConnectionStateChange) => {
+      if (disposed) return;
+      const reason = stateChange?.reason?.message || 'Ably connection failed';
+      this.statusByConv.set(conversationId, 'unavailable');
+      handlers.onStatusChange?.('unavailable', reason);
+    };
+
+    client.connection.on('connected', onConnected);
+    client.connection.on('disconnected', onDisconnected);
+    client.connection.on('failed', onFailed);
+
+    const channel = client.channels.get(channelName);
+
+    const onMsg = (msg: Ably.Message) => {
+      if (disposed || !msg.data) return;
+      const normalized = normalizeSupportMessage(msg.data, conversationId);
+      if (!normalized.isPrivateNote) {
+        handlers.onMessageNew?.(normalized);
+      }
+    };
+
+    const onTyping = (msg: Ably.Message) => {
+      if (disposed || !msg.data) return;
+      const userId = String(msg.data.userId || msg.data.senderId || '');
+      if (userId && userId !== customer.id) {
+        handlers.onTyping?.(userId, Boolean(msg.data.isTyping), msg.data.name);
+      }
+    };
+
+    const onReceiptDelivered = (msg: Ably.Message) => {
+      if (disposed || !msg.data) return;
+      const messageId = String(msg.data.messageId || msg.data.id || '');
+      if (messageId) handlers.onReceipt?.(messageId, 'delivered');
+    };
+
+    const onReceiptRead = (msg: Ably.Message) => {
+      if (disposed || !msg.data) return;
+      const messageId = String(msg.data.messageId || msg.data.id || '');
+      if (messageId) handlers.onReceipt?.(messageId, 'read');
+    };
+
+    const onConvUpdated = (msg: Ably.Message) => {
+      if (disposed || !msg.data) return;
+      const raw = msg.data;
+      handlers.onConversationUpdated?.({
+        conversationId: String(raw.conversationId || raw.id || conversationId),
+        status: raw.status ? normalizeConversationStatus(raw.status) : undefined,
+        agent: raw.agent || raw.staff ? normalizeSupportAgent(raw.agent || raw.staff) : undefined,
+        queuePosition: typeof raw.queuePosition === 'number' ? raw.queuePosition : undefined,
       });
+    };
+
+    const onSessionEnded = (msg: Ably.Message) => {
+      if (disposed) return;
+      handlers.onSessionEnded?.({
+        conversationId: String(msg.data?.conversationId || conversationId),
+        endedAt: msg.data?.endedAt,
+      });
+    };
+
+    const makeCallHandler =
+      (evt: 'incoming' | 'accepted' | 'rejected' | 'ended') => (msg: Ably.Message) => {
+        if (disposed || !msg.data) return;
+        const call = normalizeCallSession(msg.data.call || msg.data, conversationId);
+        handlers.onCallEvent?.(evt, call);
+      };
+
+    const onCallIncoming = makeCallHandler('incoming');
+    const onCallAccepted = makeCallHandler('accepted');
+    const onCallRejected = makeCallHandler('rejected');
+    const onCallEnded = makeCallHandler('ended');
+
+    const onCallSignal = (msg: Ably.Message) => {
+      if (disposed || !msg.data) return;
+      const d = msg.data as SupportCallSignalPayload;
+      if (d.fromUserId && d.fromUserId === customer.id) return;
+      handlers.onCallSignal?.({
+        callId: String(d.callId || ''),
+        conversationId: String(d.conversationId || conversationId),
+        fromUserId: d.fromUserId,
+        signalType: d.signalType,
+        sdp: d.sdp,
+        candidate: d.candidate,
+      });
+    };
+
+    channel.subscribe('message:new', onMsg);
+    channel.subscribe('message', onMsg);
+    channel.subscribe('typing', onTyping);
+    channel.subscribe('receipt:delivered', onReceiptDelivered);
+    channel.subscribe('receipt:read', onReceiptRead);
+    channel.subscribe('conversation:updated', onConvUpdated);
+    channel.subscribe('conversation:assigned', onConvUpdated);
+    channel.subscribe('conversation:ended', onSessionEnded);
+    channel.subscribe('session:ended', onSessionEnded);
+    channel.subscribe('call:incoming', onCallIncoming);
+    channel.subscribe('call:initiated', onCallIncoming);
+    channel.subscribe('call:accepted', onCallAccepted);
+    channel.subscribe('call:rejected', onCallRejected);
+    channel.subscribe('call:ended', onCallEnded);
+    channel.subscribe('call:signal', onCallSignal);
+
+    const refreshPresence = async () => {
+      if (disposed) return;
+      try {
+        const members = await channel.presence.get();
+        if (disposed) return;
+        const mapped: AblyPresenceMember[] = members.map((m) => ({
+          clientId: m.clientId,
+          data: (m.data as AblyPresenceMember['data']) || {
+            name: m.clientId,
+            role: 'customer',
+            status: 'online',
+          },
+        }));
+        handlers.onPresence?.(mapped);
+      } catch {
+        // Presence unavailable if token lacks presence capability
+      }
+    };
+
+    channel.presence.subscribe(() => {
+      refreshPresence();
+    });
+
+    channel.presence
+      .enter({
+        name: customer.name,
+        role: 'customer',
+        status: 'online',
+      })
+      .then(refreshPresence)
+      .catch(() => {});
+
+    return () => {
+      disposed = true;
+      try {
+        channel.unsubscribe('message:new', onMsg);
+        channel.unsubscribe('message', onMsg);
+        channel.unsubscribe('typing', onTyping);
+        channel.unsubscribe('receipt:delivered', onReceiptDelivered);
+        channel.unsubscribe('receipt:read', onReceiptRead);
+        channel.unsubscribe('conversation:updated', onConvUpdated);
+        channel.unsubscribe('conversation:assigned', onConvUpdated);
+        channel.unsubscribe('conversation:ended', onSessionEnded);
+        channel.unsubscribe('session:ended', onSessionEnded);
+        channel.unsubscribe('call:incoming', onCallIncoming);
+        channel.unsubscribe('call:initiated', onCallIncoming);
+        channel.unsubscribe('call:accepted', onCallAccepted);
+        channel.unsubscribe('call:rejected', onCallRejected);
+        channel.unsubscribe('call:ended', onCallEnded);
+        channel.unsubscribe('call:signal', onCallSignal);
+        channel.presence.unsubscribe();
+        channel.presence.leave().catch(() => {});
+      } catch {
+        // Ignore teardown errors
+      }
+      this.cleanupConversationClient(conversationId);
+    };
+  }
+
+  private cleanupConversationClient(conversationId: string): void {
+    const existing = this.clientsByConv.get(conversationId);
+    if (existing) {
+      try {
+        existing.close();
+      } catch {
+        // Ignore close errors
+      }
+      this.clientsByConv.delete(conversationId);
+      this.statusByConv.delete(conversationId);
     }
   }
 
-  /**
-   * Simulation helper: auto reply from assigned staff specialist
-   * Used when a customer sends a message in client view and tests real-time feedback
-   */
-  public simulateStaffReply(
-    conversationId: string,
-    agent: SupportAgent,
-    customerPrompt: string,
-    onMessageCreated: (msg: SupportMessage) => void
-  ): void {
-    // 1. Trigger typing indicator after 800ms
-    setTimeout(() => {
-      this.setTyping(conversationId, agent.id, true, agent.name);
-
-      // 2. Clear typing and dispatch contextual reply after 2.4s
-      setTimeout(() => {
-        this.setTyping(conversationId, agent.id, false, agent.name);
-
-        let replyText = `Thank you for contacting my desk. I am reviewing your request regarding "${customerPrompt.slice(0, 40)}..." and will update your portfolio ledger momentarily.`;
-
-        const lower = customerPrompt.toLowerCase();
-        if (lower.includes('wire') || lower.includes('transfer') || lower.includes('fedwire')) {
-          replyText = `Understood. I have initiated the Fedwire Realtime pre-clearance check for your transfer. Expected settlement window is within 15 minutes.`;
-        } else if (lower.includes('card') || lower.includes('limit') || lower.includes('obsidian')) {
-          replyText = `I have received your card threshold adjustment inquiry. Your Obsidian limit elevation has been temporarily queued for compliance verification.`;
-        } else if (lower.includes('yield') || lower.includes('treasury') || lower.includes('sweep')) {
-          replyText = `Your treasury allocation instructions have been recorded. At 4.85% APY, this sweep accrues daily with compounding at month-end.`;
-        } else if (lower.includes('key') || lower.includes('fido') || lower.includes('security')) {
-          replyText = `Security operations have verified your active session. Cryptographic dual-key authorization remains active.`;
-        }
-
-        const replyMsg: SupportMessage = {
-          id: `m-reply-${Date.now()}`,
-          conversationId,
-          sender: 'agent',
-          agentId: agent.id,
-          agentName: agent.name,
-          text: replyText,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          status: 'delivered'
-        };
-
-        this.publishMessage(conversationId, replyMsg);
-        onMessageCreated(replyMsg);
-      }, 2000);
-    }, 800);
+  public disconnectAll(): void {
+    for (const convId of Array.from(this.clientsByConv.keys())) {
+      this.cleanupConversationClient(convId);
+    }
   }
 }
 

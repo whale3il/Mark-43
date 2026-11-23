@@ -45,15 +45,22 @@ export interface CustomerProfile {
 }
 
 export interface SupportAttachment {
+  id?: string;
+  attachmentId?: string;
   name: string;
   size: string;
-  type: 'pdf' | 'receipt' | 'image' | 'document';
+  sizeBytes?: number;
+  mimeType?: string;
+  type: 'pdf' | 'receipt' | 'image' | 'document' | 'audio';
   url?: string;
 }
 
 export interface VoiceNoteData {
+  id?: string;
+  attachmentId?: string;
   durationSeconds: number;
   audioUrl?: string;
+  mimeType?: string;
   waveform?: number[];
 }
 
@@ -66,17 +73,26 @@ export interface SupportMessage {
   text: string;
   timestamp: string;
   status: 'sent' | 'delivered' | 'read';
+  type?: 'text' | 'attachment' | 'voice' | 'system';
+  attachmentId?: string;
   attachment?: SupportAttachment;
   voiceNote?: VoiceNoteData;
   isPrivateNote?: boolean;
   aiSuggested?: boolean;
+  clientTempId?: string;
+  pending?: boolean;
+  failed?: boolean;
+  errorMessage?: string;
 }
 
 export type InquiryCategory = 'Transfers' | 'Account Issues' | 'Security' | 'General Support';
 
+export type SupportConversationStatus = 'waiting' | 'active' | 'resolved' | 'pending' | 'closed';
+
 export interface SupportConversation {
   id: string;
   agent: SupportAgent;
+  assignedStaffId?: string;
   customerId: string;
   customerName: string;
   customerTier: string;
@@ -87,11 +103,49 @@ export interface SupportConversation {
   lastMessage: string;
   lastMessageTimestamp: string;
   unreadCount: number;
-  status: 'active' | 'resolved' | 'pending';
+  status: SupportConversationStatus;
+  queuePosition?: number;
+  closedAt?: string;
   linkedTicketId?: string;
   internalNotes?: string | string[];
   messages: SupportMessage[];
   createdAt?: string;
+}
+
+export type SupportCallType = 'audio' | 'video';
+
+export type SupportCallStatus =
+  | 'ringing'
+  | 'active'
+  | 'accepted'
+  | 'rejected'
+  | 'ended'
+  | 'missed'
+  | 'failed';
+
+export interface SupportCallSession {
+  id: string;
+  conversationId: string;
+  type: SupportCallType;
+  status: SupportCallStatus;
+  initiatorId?: string;
+  initiatorName?: string;
+  initiatorRole?: 'customer' | 'staff';
+  receiverId?: string;
+  receiverName?: string;
+  startedAt?: string;
+  acceptedAt?: string;
+  endedAt?: string;
+  iceServers?: RTCIceServer[];
+}
+
+export interface SupportCallSignalPayload {
+  callId: string;
+  conversationId: string;
+  fromUserId?: string;
+  signalType: 'offer' | 'answer' | 'ice-candidate';
+  sdp?: RTCSessionDescriptionInit;
+  candidate?: RTCIceCandidateInit;
 }
 
 export type TicketPriority = 'Urgent' | 'High' | 'Normal';

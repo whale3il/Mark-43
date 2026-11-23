@@ -292,6 +292,40 @@ const StaffPortalShell: React.FC<{
     );
   };
 
+  const handlePatchConversation = useCallback(
+    (
+      convId: string,
+      updater: (prev: StaffConversation) => StaffConversation
+    ) => {
+      setConversations((prev) => {
+        const next = prev.map((c) => (c.id === convId ? updater(c) : c));
+        const activeChats = next.filter(
+          (c) => c.status === 'active' || c.status === 'waiting'
+        ).length;
+        syncActiveChatsCount(activeChats);
+        return next;
+      });
+    },
+    [syncActiveChatsCount]
+  );
+
+  const handleRemoveConversation = useCallback(
+    (convId: string) => {
+      setConversations((prev) => {
+        const next = prev.filter((c) => c.id !== convId);
+        const activeChats = next.filter(
+          (c) => c.status === 'active' || c.status === 'waiting'
+        ).length;
+        syncActiveChatsCount(activeChats);
+        setSelectedConversationId((sel) =>
+          sel === convId ? next[0]?.id || '' : sel
+        );
+        return next;
+      });
+    },
+    [syncActiveChatsCount]
+  );
+
   const handleUpdateTicketStatusFromChat = async (
     ticketId: string,
     status: TicketStatus
@@ -359,6 +393,8 @@ const StaffPortalShell: React.FC<{
           selectedConversationId={selectedConversationId}
           onSelectConversation={setSelectedConversationId}
           onUpdateConversation={handleUpdateConversation}
+          onPatchConversation={handlePatchConversation}
+          onRemoveConversation={handleRemoveConversation}
           onUpdateTicketStatus={handleUpdateTicketStatusFromChat}
           onOpenTicketView={(ticketId) => {
             setSelectedTicketId(ticketId);

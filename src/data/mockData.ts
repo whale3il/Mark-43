@@ -29,6 +29,7 @@ import {
   SupportAnalytics,
   AiChatConversation
 } from '../types/support';
+import mockDataJson from './mockData.json';
 
 // -----------------------------------------------------------------------------
 // 1. User Profile & Private Wealth Relationship Manager
@@ -508,165 +509,14 @@ export const CASHFLOW_CHART_DATA: CashflowPoint[] = [
 // -----------------------------------------------------------------------------
 // 13. Dedicated 5 Private Wealth Support Staff Members
 // -----------------------------------------------------------------------------
-export const SUPPORT_AGENTS: Record<string, SupportAgent> = {
-  marcus: {
-    id: 'agent-1',
-    name: 'Marcus Sterling',
-    role: 'Senior VP, Private Banking & Wealth',
-    department: 'Private Wealth',
-    specialization: 'Private Wealth Advisory & Sovereign Yield Sweeps',
-    initials: 'MS',
-    status: 'online',
-    responseTime: '< 1 min',
-    license: 'FINRA Series 7, 66 · Managing Director',
-    office: '540 Madison Ave, 28th Floor, New York, NY',
-    directPhone: '+1 (212) 555-0199',
-    email: 'marcus.sterling@aureusbank.com',
-    activeConversationsCount: 3,
-    availabilityLabel: 'Available for Advisory',
-    rating: 4.98
-  },
-  wire_desk: {
-    id: 'agent-2',
-    name: 'Eleanor Vance',
-    role: 'Managing Officer, Global Wire Clearing',
-    department: 'Treasury & Wires',
-    specialization: 'High-Value Fedwire Realtime, IMAD Receipts & FX Clearing',
-    initials: 'EV',
-    status: 'online',
-    responseTime: '< 3 mins',
-    license: 'Federal Reserve Fedwire Operations Specialist',
-    office: 'Clearing Operations, Zurich / New York',
-    directPhone: '+1 (212) 555-0244',
-    email: 'clearing.desk@aureusbank.com',
-    activeConversationsCount: 4,
-    availabilityLabel: 'Clearing Desk Live',
-    rating: 4.95
-  },
-  card_concierge: {
-    id: 'agent-3',
-    name: 'Julian Croft',
-    role: 'Director, Obsidian Lifestyle Concierge',
-    department: 'Card Concierge',
-    specialization: 'Obsidian Black Metal Cards, Dynamic Limits & VIP Access',
-    initials: 'JC',
-    status: 'online',
-    responseTime: '< 2 mins',
-    license: 'Les Clefs d’Or International Partner',
-    office: 'Mayfair, London & New York',
-    directPhone: '+44 20 7946 0991',
-    email: 'concierge.obsidian@aureusbank.com',
-    activeConversationsCount: 2,
-    availabilityLabel: 'Concierge On Standby',
-    rating: 4.99
-  },
-  security_desk: {
-    id: 'agent-4',
-    name: 'Dr. Aris Thorne',
-    role: 'Head of Information Security & Cryptography',
-    department: 'Security & Compliance',
-    specialization: 'FIDO2 Hardware Keys, KYC Tier 3 & Biometric Governance',
-    initials: 'AT',
-    status: 'busy',
-    responseTime: '< 5 mins',
-    license: 'CISSP · Hardware Security Key Officer',
-    office: 'Zurich Security Operations Center',
-    directPhone: '+41 44 668 1200',
-    email: 'infosec@aureusbank.com',
-    activeConversationsCount: 3,
-    availabilityLabel: 'Reviewing Security Audit',
-    rating: 4.92
-  },
-  lending_desk: {
-    id: 'agent-5',
-    name: 'Seraphina Lin, CFA',
-    role: 'Principal Fiduciary Officer, Institutional Lending',
-    department: 'Institutional Lending',
-    specialization: 'Lombard Credit Facilities, Syndicate Escrow & Aircraft Financing',
-    initials: 'SL',
-    status: 'away',
-    responseTime: '< 10 mins',
-    license: 'CFA Charterholder · Private Credit Syndicate Partner',
-    office: 'Marina Bay Financial Centre, Singapore',
-    directPhone: '+65 6712 8800',
-    email: 'seraphina.lin@aureusbank.com',
-    activeConversationsCount: 2,
-    availabilityLabel: 'In Credit Committee (Returns in 10m)',
-    rating: 4.97
-  }
-};
+export const SUPPORT_AGENTS: Record<string, SupportAgent> =
+  mockDataJson.supportAgents as Record<string, SupportAgent>;
 
 // -----------------------------------------------------------------------------
 // 14. Customer Directory (Multi-Customer Support Ecosystem)
 // -----------------------------------------------------------------------------
-export const SUPPORT_CUSTOMERS: Record<string, CustomerProfile> = {
-  alexander: {
-    id: 'usr_alexander_wright',
-    name: 'Alexander V. Wright',
-    email: 'a.wright@wrightcapital.co',
-    phone: '+1 (415) 890-4421',
-    clientTier: 'Aureus Sovereign Private Client',
-    kycLevel: 'Tier 3 (BVN & ID Verified)',
-    accountNumberMasked: '•••• 8924',
-    avatarUrl: '/src/assets/images/avatar_bank_user_1790168725177.jpg',
-    balanceUSD: 5374520.40,
-    assignedStaffId: 'agent-1',
-    joinedYear: '2021',
-    primaryJurisdiction: 'Delaware / New York'
-  },
-  victoria: {
-    id: 'usr_victoria_montclaire',
-    name: 'Victoria Montclaire',
-    email: 'v.montclaire@montclairetrust.ch',
-    phone: '+41 22 710 4400',
-    clientTier: 'Sovereign Family Office',
-    kycLevel: 'Tier 3 (Swiss Certified)',
-    accountNumberMasked: '•••• 4108',
-    balanceUSD: 14200000.00,
-    assignedStaffId: 'agent-2',
-    joinedYear: '2019',
-    primaryJurisdiction: 'Geneva / London'
-  },
-  harrison: {
-    id: 'usr_harrison_vance',
-    name: 'Harrison Vance',
-    email: 'h.vance@apexsyndicate.com',
-    phone: '+1 (212) 555-9011',
-    clientTier: 'Corporate Ultra Tier',
-    kycLevel: 'Tier 3 Verified',
-    accountNumberMasked: '•••• 7712',
-    balanceUSD: 8900000.00,
-    assignedStaffId: 'agent-3',
-    joinedYear: '2022',
-    primaryJurisdiction: 'New York, USA'
-  },
-  sophia: {
-    id: 'usr_sophia_almansoor',
-    name: 'Sophia Al-Mansoor',
-    email: 's.almansoor@horizonassets.ae',
-    phone: '+971 4 319 8800',
-    clientTier: 'Aureus Royal Sovereign',
-    kycLevel: 'Tier 3 Verified',
-    accountNumberMasked: '•••• 3319',
-    balanceUSD: 26500000.00,
-    assignedStaffId: 'agent-4',
-    joinedYear: '2020',
-    primaryJurisdiction: 'DIFC, Dubai'
-  },
-  lucas: {
-    id: 'usr_lucas_fontaine',
-    name: 'Lucas Fontaine',
-    email: 'l.fontaine@fontainegroup.fr',
-    phone: '+33 1 42 68 55 00',
-    clientTier: 'Sovereign Private Client',
-    kycLevel: 'Tier 3 Verified',
-    accountNumberMasked: '•••• 9940',
-    balanceUSD: 6200000.00,
-    assignedStaffId: 'agent-5',
-    joinedYear: '2023',
-    primaryJurisdiction: 'Paris / Luxembourg'
-  }
-};
+export const SUPPORT_CUSTOMERS: Record<string, CustomerProfile> =
+  mockDataJson.supportCustomers as Record<string, CustomerProfile>;
 
 // -----------------------------------------------------------------------------
 // 15. Conversations Across Clients & Staff
@@ -1161,50 +1011,8 @@ export const INITIAL_TICKETS: SupportTicket[] = [
 // -----------------------------------------------------------------------------
 // 17. Approved Canned Response Templates
 // -----------------------------------------------------------------------------
-export const INITIAL_CANNED_RESPONSES: CannedResponse[] = [
-  {
-    id: 'cr-1',
-    shortcut: '/greeting',
-    title: 'Executive Welcome & Inquiry',
-    category: 'Greetings',
-    content: 'Good day. Marcus Sterling here with Aureus Private Wealth. How may my desk assist your portfolio today?'
-  },
-  {
-    id: 'cr-2',
-    shortcut: '/transfer',
-    title: 'Fedwire IMAD Dispatch Notice',
-    category: 'Wires & Transfers',
-    content: 'I have confirmed your outbound Fedwire instruction. The IMAD tracking reference will be generated and dispatched once secondary cryptographic authorization clears.'
-  },
-  {
-    id: 'cr-3',
-    shortcut: '/kyc',
-    title: 'Sovereign Tier 3 Documentation',
-    category: 'Security & KYC',
-    content: 'To elevate your vault limit to Sovereign Tier, our compliance officers require updated source-of-wealth declarations and active FIDO2 biometric key binding.'
-  },
-  {
-    id: 'cr-4',
-    shortcut: '/wait',
-    title: 'Treasury Floor Consultation Hold',
-    category: 'Hold & Verification',
-    content: 'Please allow me 2–3 minutes while I consult our institutional clearing desk on the 28th floor at 540 Madison Ave.'
-  },
-  {
-    id: 'cr-5',
-    shortcut: '/closing',
-    title: 'Formal Settlement Closure',
-    category: 'Closing',
-    content: 'It has been my pleasure assisting you today. Your transaction confirmation has been securely archived to your Vault Statements. Have a wonderful day.'
-  },
-  {
-    id: 'cr-6',
-    shortcut: '/escrow',
-    title: 'Syndicate Escrow Acknowledgement',
-    category: 'Wires & Transfers',
-    content: 'Our private syndicate escrow desk has acknowledged the capital allocation instructions. Settlement is scheduled for same-day value.'
-  }
-];
+export const INITIAL_CANNED_RESPONSES: CannedResponse[] =
+  mockDataJson.cannedResponses as CannedResponse[];
 
 // -----------------------------------------------------------------------------
 // 18. Support Analytics (Super Admin KPI Dashboard)
@@ -1302,25 +1110,24 @@ export const INITIAL_AI_CONVERSATIONS: AiChatConversation[] = [
 // -----------------------------------------------------------------------------
 // 20. Aureus Staff Portal (Dev-Only Fallback Records when Backend is Offline)
 // -----------------------------------------------------------------------------
-export const STAFF_PORTAL_PREVIEW_PROFILE = {
-  id: SUPPORT_AGENTS.marcus.id,
-  email: SUPPORT_AGENTS.marcus.email,
-  name: SUPPORT_AGENTS.marcus.name,
-  role: SUPPORT_AGENTS.marcus.role,
-  department: SUPPORT_AGENTS.marcus.department,
-  specialization: SUPPORT_AGENTS.marcus.specialization,
-  initials: SUPPORT_AGENTS.marcus.initials,
-  availability: 'ONLINE' as const,
-  maxChats: 5,
-  activeChatsCount: INITIAL_CONVERSATIONS.filter(
-    (c) => c.agent.id === SUPPORT_AGENTS.marcus.id && c.status === 'active'
-  ).length,
-  license: SUPPORT_AGENTS.marcus.license,
-  office: SUPPORT_AGENTS.marcus.office,
-  directPhone: SUPPORT_AGENTS.marcus.directPhone,
-  responseTime: SUPPORT_AGENTS.marcus.responseTime,
-  rating: SUPPORT_AGENTS.marcus.rating,
-};
+export const STAFF_PORTAL_PREVIEW_PROFILE =
+  mockDataJson.staffPortalPreviewProfile as {
+    id: string;
+    email: string;
+    name: string;
+    role: string;
+    department: string;
+    specialization: string;
+    initials: string;
+    availability: 'ONLINE';
+    maxChats: number;
+    activeChatsCount: number;
+    license: string;
+    office: string;
+    directPhone: string;
+    responseTime: string;
+    rating: number;
+  };
 
 export const STAFF_PORTAL_TICKET_EXTENSIONS: Record<
   string,
@@ -1372,40 +1179,18 @@ export const STAFF_PORTAL_TICKET_EXTENSIONS: Record<
   },
 };
 
-export const STAFF_PORTAL_RECENT_ACTIVITY = [
-  {
-    id: 'staff-act-1',
-    type: 'message' as const,
-    title: 'Alexander V. Wright · Quarterly Liquid Yield & Syndicate Carry Sweep',
-    detail: 'Client approved $80,000 Treasury Reserve allocation instruction.',
-    timestamp: '10:42 AM',
-    relatedConversationId: 'conv-1',
-  },
-  {
-    id: 'staff-act-2',
-    type: 'ticket' as const,
-    title: 'TKT-9012-TAX · Q4 Sovereign Fiduciary Trust Tax-Loss Harvesting Mandate',
-    detail: 'Pending tax counsel signature · Priority High',
-    timestamp: '11:30 AM',
-    relatedTicketId: 'TKT-9012-TAX',
-  },
-  {
-    id: 'staff-act-3',
-    type: 'ticket' as const,
-    title: 'TKT-8921-NY · Treasury Reserve Yield Allocation ($80,000 Sweep)',
-    detail: 'In Review · Treasury desk allocation order prepared',
-    timestamp: '09:34 AM',
-    relatedTicketId: 'TKT-8921-NY',
-  },
-];
+export const STAFF_PORTAL_RECENT_ACTIVITY = mockDataJson.staffPortalRecentActivity as Array<{
+  id: string;
+  type: 'message' | 'ticket';
+  title: string;
+  detail: string;
+  timestamp: string;
+  relatedConversationId?: string;
+  relatedTicketId?: string;
+}>;
 
-export const STAFF_PORTAL_NOTIFICATION_PREFERENCES = {
-  newAssignmentAlert: true,
-  unreadMessageChime: true,
-  ticketEscalationAlert: true,
-  whisperMentionAlert: true,
-  desktopNotifications: false,
-};
+export const STAFF_PORTAL_NOTIFICATION_PREFERENCES =
+  mockDataJson.staffPortalNotificationPreferences;
 
 // -----------------------------------------------------------------------------
 // 21. Aureus Admin Portal (Dev-Only Fallback Records when Backend is Offline)

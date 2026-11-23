@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ArrowLeft,
   MessageSquare,
@@ -22,6 +22,11 @@ import {
   AlertCircle,
   Loader2,
   Smile,
+  Play,
+  Pause,
+  Download,
+  LogOut,
+  RotateCcw,
 } from 'lucide-react';
 import {
   AiAssistEntry,
@@ -31,11 +36,20 @@ import {
   StaffConversation,
   StaffMemberProfile,
   StaffTicket,
+  SupportCallSession,
+  SupportCallType,
   TicketStatus,
 } from '../types/staff.types';
 import { staffPortalService } from '../services/staffPortalService';
 import { staffAblyService } from '../services/staffAblyService';
+import { isSafeMediaUrl } from '@/src/services/supportService';
+import { WebRtcCallManager } from '@/src/services/webrtcCallManager';
 import { CannedResponsesMenu } from '@/src/components/support/CannedResponsesMenu';
+import {
+  SupportCallOverlay,
+  CallOverlayPhase,
+} from '@/src/components/support/SupportCallOverlay';
+import { EndSessionConfirmModal } from '@/src/components/support/EndSessionConfirmModal';
 import { StaffInboxPanel } from '../components/StaffInboxPanel';
 import { StaffCustomerDetailsPanel } from '../components/StaffCustomerDetailsPanel';
 import { StaffAiTabWorkspace } from '../components/StaffAiTabWorkspace';
@@ -53,6 +67,11 @@ interface StaffConversationsPageProps {
   selectedConversationId: string;
   onSelectConversation: (convId: string) => void;
   onUpdateConversation: (updated: StaffConversation) => void;
+  onPatchConversation: (
+    convId: string,
+    updater: (prev: StaffConversation) => StaffConversation
+  ) => void;
+  onRemoveConversation: (convId: string) => void;
   onUpdateTicketStatus?: (ticketId: string, status: TicketStatus) => Promise<void>;
   onOpenTicketView?: (ticketId: string) => void;
   isLoadingData: boolean;
@@ -60,6 +79,58 @@ interface StaffConversationsPageProps {
 }
 
 const REACTION_EMOJIS = ['👍', '✅', '🙏'];
+
+function mergeStaffMessages(
+  existing: StaffChatMessage[],
+  incoming: StaffChatMessage[]
+): StaffChatMessage[] {
+  const byKey = new Map<string, StaffChatMessage>();
+  const failedLocals: StaffChatMessage[] = [];
+
+  for (const m of existing) {
+    if (m.failed) {
+      failedLocals.push(m);
+      continue;
+    }
+    byKey.set(m.id, m);
+  }
+
+  for (const srv of incoming) {
+    if (srv.clientTempId) {
+      for (const [k, v] of byKey.entries()) {
+        if (k === srv.clientTempId || v.clientTempId === srv.clientTempId) {
+          byKey.delete(k);
+        }
+      }
+    }
+    const prev = byKey.get(srv.id);
+    byKey.set(
+      srv.id,
+      prev ? { ...prev, ...srv, pending: false, failed: false } : srv
+    );
+  }
+
+  return [...Array.from(byKey.values()), ...failedLocals];
+}
+
+function appendOrReconcileStaffMessage(
+  existing: StaffChatMessage[],
+  incoming: StaffChatMessage
+): StaffChatMessage[] {
+  const idx = existing.findIndex(
+    (m) =>
+      m.id === incoming.id ||
+      (Boolean(incoming.clientTempId) &&
+        (m.clientTempId === incoming.clientTempId ||
+          m.id === incoming.clientTempId))
+  );
+  if (idx >= 0) {
+    const next = [...existing];
+    next[idx] = { ...next[idx], ...incoming, pending: false, failed: false };
+    return next;
+  }
+  return [...existing, incoming];
+}
 
 export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
   staff,
@@ -70,6 +141,8 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
   selectedConversationId,
   onSelectConversation,
   onUpdateConversation,
+  onPatchConversation,
+  onRemoveConversation,
   onUpdateTicketStatus,
   onOpenTicketView,
   isLoadingData,
@@ -94,54 +167,71 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
 
   // Preserve unsent drafts + whisper mode per conversation across Chat <-> AI tab switches
   const [draftsByConv, setDraftsByConv] = useState<Record<string, string>>({});
-  const [whisperModeByConv, setWhisperModeByConv] = useState<Record<string, boolean>>({});
+  const [whisperModeByConv, setWhisperModeByConv] = useState<
+    Record<string, boolean>
+  >({});
   const [aiHistoryByConv, setAiHistoryByConv] = useState<
     Record<string, AiAssistEntry[]>
   >({});
 
   // Message actions & composer state
   const [isSending, setIsSending] = useState(false);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [showCannedMenu, setShowCannedMenu] = useState(false);
   const [cannedQuery, setCannedQuery] = useState('');
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
-  const [reactionPickerMsgId, setReactionPickerMsgId] = useState<string | null>(null);
+  const [reactionPickerMsgId, setReactionPickerMsgId] = useState<string | null>(
+    null
+  );
 
   // In-conversation message search
   const [msgSearchOpen, setMsgSearchOpen] = useState(false);
   const [msgSearchQuery, setMsgSearchQuery] = useState('');
-  const [backendSearchResults, setBackendSearchResults] = useState<StaffChatMessage[] | null>(
-    null
-  );
+  const [backendSearchResults, setBackendSearchResults] = useState<
+    StaffChatMessage[] | null
+  >(null);
   const [isSearchingBackend, setIsSearchingBackend] = useState(false);
 
-  // Attachments, Voice Recording, Call Session Readiness
+  // Attachments, Voice Recording & Playback
   const [pendingAttachment, setPendingAttachment] =
     useState<StaffChatMessage['attachment'] | null>(null);
   const [uploadingFile, setUploadingFile] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
-  const [callState, setCallState] = useState<{
-    open: boolean;
-    mode: 'audio' | 'video';
-    status: string;
-    detail: string;
-  } | null>(null);
+  const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
 
-  // Realtime presence & typing telemetry
-  const [isCustomerTyping, setIsCustomerTyping] = useState(false);
-  const [customerPresentOnline, setCustomerPresentOnline] = useState<boolean | null>(
-    null
-  );
+  // Real WebRTC Audio / Video call state
+  const [activeCall, setActiveCall] = useState<SupportCallSession | null>(null);
+  const [callPhase, setCallPhase] = useState<CallOverlayPhase>('ended');
+  const [callError, setCallError] = useState<string | null>(null);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+
+  // End Session confirmation modal
+  const [showEndSessionModal, setShowEndSessionModal] = useState(false);
+  const [isEndingSession, setIsEndingSession] = useState(false);
+  const [endSessionError, setEndSessionError] = useState<string | null>(null);
+
+  // Realtime per-conversation presence & typing telemetry
+  const [typingByConv, setTypingByConv] = useState<Record<string, boolean>>({});
+  const [presenceByConv, setPresenceByConv] = useState<
+    Record<string, boolean>
+  >({});
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingSecondsRef = useRef<number>(0);
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const splitContainerRef = useRef<HTMLDivElement | null>(null);
+  const callManagerRef = useRef<WebRtcCallManager | null>(null);
+  const activeCallRef = useRef<SupportCallSession | null>(null);
+  activeCallRef.current = activeCall;
 
   const {
     width: inboxWidth,
@@ -158,10 +248,19 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
     containerRef: splitContainerRef,
   });
 
+  const activeConversations = conversations.filter((c) => c.status !== 'closed');
   const activeConv =
-    conversations.find((c) => c.id === selectedConversationId) ||
-    conversations[0] ||
+    activeConversations.find((c) => c.id === selectedConversationId) ||
+    activeConversations[0] ||
     null;
+
+  const activeConvIdRef = useRef<string>('');
+  activeConvIdRef.current = activeConv?.id || '';
+
+  const isCustomerTyping = Boolean(activeConv && typingByConv[activeConv.id]);
+  const customerPresentOnline = activeConv
+    ? presenceByConv[activeConv.id] ?? null
+    : null;
 
   const activeDraft = activeConv ? draftsByConv[activeConv.id] || '' : '';
   const isWhisperDraft = activeConv
@@ -180,17 +279,45 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
       )
     : undefined;
 
+  const cleanupMediaAndCall = useCallback(() => {
+    if (callManagerRef.current) {
+      callManagerRef.current.dispose();
+      callManagerRef.current = null;
+    }
+    setLocalStream(null);
+    setRemoteStream(null);
+  }, []);
+
   useEffect(() => {
     return () => {
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      if (
+        mediaRecorderRef.current &&
+        mediaRecorderRef.current.state !== 'inactive'
+      ) {
+        try {
+          mediaRecorderRef.current.stream.getTracks().forEach((t) => t.stop());
+          mediaRecorderRef.current.stop();
+        } catch {
+          // Safe cleanup
+        }
+      }
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+        audioPlayerRef.current = null;
+      }
+      cleanupMediaAndCall();
     };
-  }, []);
+  }, [cleanupMediaAndCall]);
 
   // Scroll messages list to latest message cleanly
   useEffect(() => {
     if (centralTab === 'chat') {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      messagesEndRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'end',
+      });
     }
   }, [activeConv?.id, activeConv?.messages.length, centralTab, isCustomerTyping]);
 
@@ -206,7 +333,10 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
     let cancelled = false;
     setIsSearchingBackend(true);
     const timer = setTimeout(async () => {
-      const res = await staffPortalService.searchConversationMessages(activeConv.id, q);
+      const res = await staffPortalService.searchConversationMessages(
+        activeConv.id,
+        q
+      );
       if (cancelled) return;
       if (res.success && res.data) {
         setBackendSearchResults(res.data);
@@ -222,76 +352,264 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
     };
   }, [msgSearchOpen, msgSearchQuery, activeConv?.id]);
 
-  // Subscribe to Ably channel events & presence for active conversation
-  useEffect(() => {
-    if (!activeConv?.id) {
-      setIsCustomerTyping(false);
-      setCustomerPresentOnline(null);
-      return;
-    }
-
-    const unsub = staffAblyService.subscribeConversation(activeConv.id, staff, {
-      onMessageNew: (incoming) => {
-        if (!activeConv.messages.some((m) => m.id === incoming.id)) {
-          onUpdateConversation({
-            ...activeConv,
-            messages: [...activeConv.messages, incoming],
-            lastMessage: incoming.text,
-            lastMessageTimestamp: incoming.timestamp,
+  const fetchConversationMessages = useCallback(
+    async (convId: string) => {
+      if (!convId) return;
+      setIsLoadingMessages(true);
+      try {
+        const res = await staffPortalService.getConversationMessages(convId);
+        if (res.success && res.data) {
+          const serverMessages = res.data;
+          onPatchConversation(convId, (prev) => {
+            const merged = mergeStaffMessages(prev.messages, serverMessages);
+            const latest = merged[merged.length - 1];
+            return {
+              ...prev,
+              messages: merged,
+              lastMessage: latest?.text || prev.lastMessage,
+              lastMessageTimestamp:
+                latest?.timestamp || prev.lastMessageTimestamp,
+            };
           });
+          if (
+            serverMessages.some(
+              (m) => m.sender === 'customer' && m.status !== 'read'
+            )
+          ) {
+            staffPortalService.markRead(convId).catch(() => {});
+          }
         }
-      },
-      onMessageUpdated: (partial) => {
-        onUpdateConversation({
-          ...activeConv,
-          messages: activeConv.messages.map((m) =>
-            m.id === partial.id ? { ...m, ...partial } : m
-          ),
-        });
-      },
-      onMessageDeleted: ({ id, deletedAt }) => {
-        onUpdateConversation({
-          ...activeConv,
-          messages: activeConv.messages.map((m) =>
-            m.id === id
-              ? { ...m, deletedAt: deletedAt || new Date().toISOString() }
-              : m
-          ),
-        });
-      },
-      onReaction: ({ messageId, reactions }) => {
-        onUpdateConversation({
-          ...activeConv,
-          messages: activeConv.messages.map((m) =>
-            m.id === messageId ? { ...m, reactions } : m
-          ),
-        });
-      },
-      onTyping: (userId, typing) => {
-        if (userId !== staff.id) {
-          setIsCustomerTyping(typing);
-        }
-      },
-      onReceipt: (messageId, status) => {
-        onUpdateConversation({
-          ...activeConv,
-          messages: activeConv.messages.map((m) =>
-            m.id === messageId ? { ...m, status } : m
-          ),
-        });
-      },
-      onPresence: (members) => {
-        const customerOnline = members.some(
-          (m) => m.data?.role === 'customer' || m.clientId === activeConv.customerId
-        );
-        setCustomerPresentOnline(customerOnline);
-      },
+      } finally {
+        setIsLoadingMessages(false);
+      }
+    },
+    [onPatchConversation]
+  );
+
+  // Load persisted messages + active call state when switching active conversation
+  useEffect(() => {
+    if (!activeConv?.id) return;
+    const convId = activeConv.id;
+    fetchConversationMessages(convId);
+
+    staffPortalService.listCalls(convId).then((res) => {
+      if (!res.success || !res.data || activeConvIdRef.current !== convId) return;
+      const incoming = res.data.find(
+        (c) =>
+          c.status === 'ringing' && c.initiatorId && c.initiatorId !== staff.id
+      );
+      if (incoming && !activeCallRef.current) {
+        setActiveCall(incoming);
+        setCallPhase('incoming_ringing');
+        setCallError(null);
+      }
     });
+  }, [activeConv?.id, staff.id, fetchConversationMessages]);
+
+  const createManagerForCall = useCallback(
+    (call: SupportCallSession) => {
+      cleanupMediaAndCall();
+      const manager = new WebRtcCallManager(
+        call.conversationId,
+        call.type,
+        {
+          onLocalStream: (s) => setLocalStream(s),
+          onRemoteStream: (s) => setRemoteStream(s),
+          onConnectionState: (state) => {
+            if (state === 'connected') {
+              setCallPhase('active');
+            } else if (state === 'connecting') {
+              setCallPhase('connecting');
+            } else if (state === 'failed') {
+              setCallPhase('error');
+              setCallError('WebRTC peer connection failed to establish media.');
+            }
+          },
+          onSignal: (signal) => {
+            staffPortalService
+              .sendCallSignal(call.id, {
+                ...signal,
+                fromUserId: staff.id,
+              })
+              .catch(() => {});
+          },
+        },
+        call.iceServers
+      );
+      callManagerRef.current = manager;
+      return manager;
+    },
+    [cleanupMediaAndCall, staff.id]
+  );
+
+  // Subscribe to Ably channel events & presence across ALL assigned non-closed conversations
+  const activeConvIdsKey = activeConversations.map((c) => c.id).join(',');
+
+  useEffect(() => {
+    const convIds = activeConvIdsKey ? activeConvIdsKey.split(',') : [];
+    if (convIds.length === 0 || !staff.id) return;
+
+    const unsubscribers = convIds.map((convId) =>
+      staffAblyService.subscribeConversation(convId, staff, {
+        onMessageNew: (incoming) => {
+          const isCurrentlyViewing = activeConvIdRef.current === convId;
+          onPatchConversation(convId, (prev) => {
+            const nextMessages = appendOrReconcileStaffMessage(
+              prev.messages,
+              incoming
+            );
+            return {
+              ...prev,
+              messages: nextMessages,
+              lastMessage: incoming.isWhisper ? prev.lastMessage : incoming.text,
+              lastMessageTimestamp: incoming.isWhisper
+                ? prev.lastMessageTimestamp
+                : incoming.timestamp,
+              unreadCount:
+                incoming.sender === 'customer' && !isCurrentlyViewing
+                  ? (prev.unreadCount || 0) + 1
+                  : isCurrentlyViewing
+                  ? 0
+                  : prev.unreadCount,
+            };
+          });
+
+          if (incoming.sender === 'customer') {
+            staffPortalService.markDelivered(convId, incoming.id).catch(() => {});
+            if (isCurrentlyViewing) {
+              staffPortalService.markRead(convId, incoming.id).catch(() => {});
+            }
+          }
+        },
+        onMessageUpdated: (partial) => {
+          onPatchConversation(convId, (prev) => ({
+            ...prev,
+            messages: prev.messages.map((m) =>
+              m.id === partial.id ? { ...m, ...partial } : m
+            ),
+          }));
+        },
+        onMessageDeleted: ({ id, deletedAt }) => {
+          onPatchConversation(convId, (prev) => ({
+            ...prev,
+            messages: prev.messages.map((m) =>
+              m.id === id
+                ? { ...m, deletedAt: deletedAt || new Date().toISOString() }
+                : m
+            ),
+          }));
+        },
+        onReaction: ({ messageId, reactions }) => {
+          onPatchConversation(convId, (prev) => ({
+            ...prev,
+            messages: prev.messages.map((m) =>
+              m.id === messageId ? { ...m, reactions } : m
+            ),
+          }));
+        },
+        onTyping: (_userId, typing) => {
+          setTypingByConv((prev) => ({ ...prev, [convId]: typing }));
+        },
+        onReceipt: (messageId, status) => {
+          onPatchConversation(convId, (prev) => ({
+            ...prev,
+            messages: prev.messages.map((m) =>
+              m.id === messageId ? { ...m, status } : m
+            ),
+          }));
+        },
+        onConversationUpdated: (patch) => {
+          if (patch.status) {
+            onPatchConversation(convId, (prev) => ({
+              ...prev,
+              status: patch.status!,
+            }));
+          }
+        },
+        onSessionEnded: () => {
+          onRemoveConversation(convId);
+          if (activeConvIdRef.current === convId) {
+            setShowEndSessionModal(false);
+            cleanupMediaAndCall();
+            setActiveCall(null);
+            setSendError(null);
+          }
+        },
+        onCallEvent: (eventType, call) => {
+          if (eventType === 'incoming') {
+            if (
+              call.initiatorId === staff.id ||
+              activeCallRef.current?.id === call.id
+            ) {
+              return;
+            }
+            setActiveCall(call);
+            setCallPhase('incoming_ringing');
+            setCallError(null);
+          } else if (eventType === 'accepted') {
+            if (activeCallRef.current?.id === call.id) {
+              setActiveCall((prev) =>
+                prev ? { ...prev, status: 'accepted' } : call
+              );
+              setCallPhase('connecting');
+              if (call.initiatorId === staff.id || !callManagerRef.current) {
+                const mgr = callManagerRef.current || createManagerForCall(call);
+                mgr.createAndSendOffer().catch((err) => {
+                  setCallPhase('error');
+                  setCallError(
+                    err?.message || 'Microphone/camera access denied.'
+                  );
+                });
+              }
+            }
+          } else if (eventType === 'rejected') {
+            if (activeCallRef.current?.id === call.id) {
+              cleanupMediaAndCall();
+              setCallPhase('rejected');
+              setCallError('Client is unavailable or declined the call.');
+            }
+          } else if (eventType === 'ended') {
+            if (activeCallRef.current?.id === call.id) {
+              cleanupMediaAndCall();
+              setCallPhase('ended');
+            }
+          }
+        },
+        onCallSignal: (signal) => {
+          if (
+            activeCallRef.current?.id === signal.callId &&
+            callManagerRef.current
+          ) {
+            callManagerRef.current.handleSignal(signal).catch((err) => {
+              setCallPhase('error');
+              setCallError(err?.message || 'WebRTC signaling error.');
+            });
+          }
+        },
+        onPresence: (members) => {
+          const online = members.some((m) => m.data?.role === 'customer');
+          setPresenceByConv((prev) => ({ ...prev, [convId]: online }));
+        },
+        onReconnected: () => {
+          fetchConversationMessages(convId);
+        },
+      })
+    );
 
     return () => {
-      unsub();
+      unsubscribers.forEach((unsub) => unsub());
     };
-  }, [activeConv?.id, staff.id]);
+  }, [
+    activeConvIdsKey,
+    staff.id,
+    staff.name,
+    staff.availability,
+    onPatchConversation,
+    onRemoveConversation,
+    cleanupMediaAndCall,
+    createManagerForCall,
+    fetchConversationMessages,
+  ]);
 
   const handleSelectThread = async (convId: string) => {
     onSelectConversation(convId);
@@ -299,10 +617,9 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
     setSendError(null);
     const conv = conversations.find((c) => c.id === convId);
     if (conv && conv.unreadCount > 0) {
-      const res = await staffPortalService.markConversationRead(convId);
-      if (res.success) {
-        onUpdateConversation({ ...conv, unreadCount: 0 });
-      }
+      onPatchConversation(convId, (prev) => ({ ...prev, unreadCount: 0 }));
+      staffPortalService.markConversationRead(convId).catch(() => {});
+      staffPortalService.markRead(convId).catch(() => {});
     }
   };
 
@@ -315,12 +632,28 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
     setDraftForActive(val);
     if (!activeConv) return;
 
-    staffAblyService.publishTyping(activeConv.id, staff.id, staff.name, val.length > 0);
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    if (val.length > 0) {
+
+    if (val.trim().length > 0 && !isWhisperDraft) {
+      staffAblyService.publishTyping(activeConv.id, staff.id, staff.name, true);
+      staffPortalService.sendTyping(activeConv.id, true).catch(() => {});
       typingTimeoutRef.current = setTimeout(() => {
-        staffAblyService.publishTyping(activeConv.id, staff.id, staff.name, false);
+        staffAblyService.publishTyping(
+          activeConv.id,
+          staff.id,
+          staff.name,
+          false
+        );
+        staffPortalService.sendTyping(activeConv.id, false).catch(() => {});
       }, 2500);
+    } else {
+      staffAblyService.publishTyping(
+        activeConv.id,
+        staff.id,
+        staff.name,
+        false
+      );
+      staffPortalService.sendTyping(activeConv.id, false).catch(() => {});
     }
 
     const lastWord = val.split(/\s/).pop() || '';
@@ -340,46 +673,149 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
     setShowCannedMenu(false);
   };
 
+  const dispatchMessagePayload = async (
+    convId: string,
+    optimisticMsg: StaffChatMessage,
+    payload: {
+      text: string;
+      isWhisper?: boolean;
+      type?: 'text' | 'attachment' | 'voice';
+      attachmentId?: string;
+      attachment?: StaffChatMessage['attachment'];
+      voiceNote?: StaffChatMessage['voiceNote'];
+      clientTempId: string;
+    }
+  ) => {
+    const res = await staffPortalService.sendMessage(convId, payload);
+    if (res.success && res.data) {
+      const confirmed = res.data;
+      onPatchConversation(convId, (prev) => {
+        const nextMsgs = appendOrReconcileStaffMessage(prev.messages, {
+          ...confirmed,
+          clientTempId: confirmed.clientTempId || payload.clientTempId,
+        });
+        return {
+          ...prev,
+          messages: nextMsgs,
+          lastMessage: confirmed.isWhisper ? prev.lastMessage : confirmed.text,
+          lastMessageTimestamp: confirmed.isWhisper
+            ? prev.lastMessageTimestamp
+            : confirmed.timestamp,
+          unreadCount: 0,
+        };
+      });
+    } else {
+      const errText =
+        res.error?.message || 'Message could not be delivered. Tap Retry.';
+      setSendError(errText);
+      onPatchConversation(convId, (prev) => ({
+        ...prev,
+        messages: prev.messages.map((m) =>
+          m.id === optimisticMsg.id || m.clientTempId === payload.clientTempId
+            ? { ...m, pending: false, failed: true, errorMessage: errText }
+            : m
+        ),
+      }));
+    }
+  };
+
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!activeConv || isSending) return;
     const text = activeDraft.trim();
     if (!text && !pendingAttachment) return;
 
+    const convId = activeConv.id;
+    const msgType = pendingAttachment ? 'attachment' : 'text';
+    const msgText = text || `Attached document: ${pendingAttachment?.name}`;
+    const attachmentToSend = pendingAttachment;
+    const attachmentId =
+      attachmentToSend?.attachmentId || attachmentToSend?.id || undefined;
+    const clientTempId = `tmp-stf-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 7)}`;
+    const timeNow = new Date().toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    const optimisticMsg: StaffChatMessage = {
+      id: clientTempId,
+      clientTempId,
+      conversationId: convId,
+      sender: 'agent',
+      agentId: staff.id,
+      agentName: staff.name,
+      text: msgText,
+      timestamp: timeNow,
+      status: 'sent',
+      type: msgType,
+      attachmentId,
+      attachment: attachmentToSend || undefined,
+      isPrivateNote: isWhisperDraft,
+      isWhisper: isWhisperDraft,
+      pending: true,
+      failed: false,
+    };
+
     setSendError(null);
+    setDraftForActive('');
+    setPendingAttachment(null);
+    setShowCannedMenu(false);
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    staffAblyService.publishTyping(convId, staff.id, staff.name, false);
+    staffPortalService.sendTyping(convId, false).catch(() => {});
+
+    onPatchConversation(convId, (prev) => ({
+      ...prev,
+      messages: [...prev.messages, optimisticMsg],
+      lastMessage: isWhisperDraft ? prev.lastMessage : msgText,
+      lastMessageTimestamp: isWhisperDraft ? prev.lastMessageTimestamp : timeNow,
+      unreadCount: 0,
+    }));
+
     setIsSending(true);
-    staffAblyService.publishTyping(activeConv.id, staff.id, staff.name, false);
-
     try {
-      const res = await staffPortalService.sendMessage(activeConv.id, {
-        text: text || `Attachment: ${pendingAttachment?.name}`,
+      await dispatchMessagePayload(convId, optimisticMsg, {
+        text: msgText,
         isWhisper: isWhisperDraft,
-        attachment: pendingAttachment || undefined,
+        type: msgType,
+        attachmentId,
+        attachment: attachmentToSend || undefined,
+        clientTempId,
       });
-
-      if (res.success && res.data) {
-        const sentMsg = res.data;
-        onUpdateConversation({
-          ...activeConv,
-          messages: [...activeConv.messages, sentMsg],
-          lastMessage: sentMsg.isWhisper ? activeConv.lastMessage : sentMsg.text,
-          lastMessageTimestamp: sentMsg.isWhisper
-            ? activeConv.lastMessageTimestamp
-            : sentMsg.timestamp,
-          unreadCount: 0,
-        });
-        setDraftForActive('');
-        setPendingAttachment(null);
-        setShowCannedMenu(false);
-      } else {
-        setSendError(
-          res.error?.message ||
-            'Message could not be sent to backend (`POST /api/staff/conversations/:id/messages`). Your draft was preserved.'
-        );
-      }
     } finally {
       setIsSending(false);
     }
+  };
+
+  const handleRetryFailedMessage = async (failedMsg: StaffChatMessage) => {
+    if (!activeConv) return;
+    const convId = activeConv.id;
+    const clientTempId = failedMsg.clientTempId || failedMsg.id;
+
+    setSendError(null);
+    onPatchConversation(convId, (prev) => ({
+      ...prev,
+      messages: prev.messages.map((m) =>
+        m.id === failedMsg.id
+          ? { ...m, pending: true, failed: false, errorMessage: undefined }
+          : m
+      ),
+    }));
+
+    await dispatchMessagePayload(convId, failedMsg, {
+      text: failedMsg.text,
+      isWhisper: Boolean(failedMsg.isWhisper || failedMsg.isPrivateNote),
+      type:
+        failedMsg.type === 'attachment' || failedMsg.type === 'voice'
+          ? failedMsg.type
+          : 'text',
+      attachmentId: failedMsg.attachmentId,
+      attachment: failedMsg.attachment,
+      voiceNote: failedMsg.voiceNote,
+      clientTempId,
+    });
   };
 
   const handleCommitEdit = async (msg: StaffChatMessage) => {
@@ -387,18 +823,19 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
       setEditingMsgId(null);
       return;
     }
+    const convId = activeConv.id;
     const res = await staffPortalService.editMessage(
-      activeConv.id,
+      convId,
       msg.id,
       editingText.trim()
     );
     if (res.success && res.data) {
-      onUpdateConversation({
-        ...activeConv,
-        messages: activeConv.messages.map((m) =>
+      onPatchConversation(convId, (prev) => ({
+        ...prev,
+        messages: prev.messages.map((m) =>
           m.id === msg.id ? { ...m, ...res.data } : m
         ),
-      });
+      }));
       setEditingMsgId(null);
     } else {
       setSendError(res.error?.message || 'Unable to edit message on backend.');
@@ -407,16 +844,17 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
 
   const handleDeleteMessage = async (msgId: string) => {
     if (!activeConv) return;
-    const res = await staffPortalService.deleteMessage(activeConv.id, msgId);
+    const convId = activeConv.id;
+    const res = await staffPortalService.deleteMessage(convId, msgId);
     if (res.success) {
-      onUpdateConversation({
-        ...activeConv,
-        messages: activeConv.messages.map((m) =>
+      onPatchConversation(convId, (prev) => ({
+        ...prev,
+        messages: prev.messages.map((m) =>
           m.id === msgId
             ? { ...m, deletedAt: res.data?.deletedAt || new Date().toISOString() }
             : m
         ),
-      });
+      }));
     } else {
       setSendError(res.error?.message || 'Unable to delete message on backend.');
     }
@@ -425,14 +863,15 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
   const handleReactMessage = async (msgId: string, emoji: string) => {
     setReactionPickerMsgId(null);
     if (!activeConv) return;
-    const res = await staffPortalService.reactToMessage(activeConv.id, msgId, emoji);
+    const convId = activeConv.id;
+    const res = await staffPortalService.reactToMessage(convId, msgId, emoji);
     if (res.success && res.data) {
-      onUpdateConversation({
-        ...activeConv,
-        messages: activeConv.messages.map((m) =>
+      onPatchConversation(convId, (prev) => ({
+        ...prev,
+        messages: prev.messages.map((m) =>
           m.id === msgId ? { ...m, reactions: res.data!.reactions } : m
         ),
-      });
+      }));
     } else {
       setSendError(res.error?.message || 'Reaction endpoint is not active.');
     }
@@ -440,6 +879,7 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
 
   const handleFilePicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file || !activeConv) return;
     setUploadingFile(true);
     setSendError(null);
@@ -449,20 +889,56 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
         setPendingAttachment(res.data);
       } else {
         setSendError(
-          res.error?.message ||
-            'Attachment upload endpoint (`POST /api/staff/attachments`) is not active.'
+          res.error?.message || 'Attachment upload failed on backend server.'
         );
       }
     } finally {
       setUploadingFile(false);
-      e.target.value = '';
     }
+  };
+
+  const handleOpenAttachment = async (msg: StaffChatMessage) => {
+    const attachmentId =
+      msg.attachmentId || msg.attachment?.attachmentId || msg.attachment?.id;
+    let targetUrl =
+      msg.attachment?.url && isSafeMediaUrl(msg.attachment.url)
+        ? msg.attachment.url
+        : undefined;
+
+    if (attachmentId) {
+      const res = await staffPortalService.getAttachmentUrl(attachmentId);
+      if (res.success && res.data?.url) {
+        targetUrl = res.data.url;
+      } else if (!targetUrl) {
+        setSendError(
+          res.error?.message ||
+            'Unable to generate secure download link for this attachment.'
+        );
+        return;
+      }
+    }
+
+    if (!targetUrl || !isSafeMediaUrl(targetUrl)) {
+      setSendError('No valid download link is attached to this file.');
+      return;
+    }
+
+    const link = document.createElement('a');
+    link.href = targetUrl;
+    link.download = msg.attachment?.name || 'attachment';
+    link.rel = 'noopener noreferrer';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleToggleVoiceNote = async () => {
     if (!activeConv) return;
     if (!isRecording) {
-      if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      if (
+        typeof navigator === 'undefined' ||
+        !navigator.mediaDevices?.getUserMedia
+      ) {
         setSendError('Microphone capture is not supported in this browser.');
         return;
       }
@@ -470,6 +946,8 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const recorder = new MediaRecorder(stream);
         audioChunksRef.current = [];
+        recordingSecondsRef.current = 0;
+
         recorder.ondataavailable = (ev) => {
           if (ev.data.size > 0) audioChunksRef.current.push(ev.data);
         };
@@ -477,71 +955,222 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
         mediaRecorderRef.current = recorder;
         setRecordingSeconds(0);
         setIsRecording(true);
+        setSendError(null);
         recordingTimerRef.current = setInterval(() => {
-          setRecordingSeconds((s) => s + 1);
+          recordingSecondsRef.current += 1;
+          setRecordingSeconds(recordingSecondsRef.current);
         }, 1000);
       } catch {
         setSendError('Microphone permission denied or unavailable.');
       }
-    } else {
-      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
-      const duration = Math.max(recordingSeconds, 1);
-      setIsRecording(false);
-      const recorder = mediaRecorderRef.current;
-      if (recorder) {
-        recorder.onstop = async () => {
-          const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-          recorder.stream.getTracks().forEach((t) => t.stop());
-          const uploadRes = await staffPortalService.uploadVoiceNote(
-            activeConv.id,
-            blob,
-            duration
-          );
-          if (uploadRes.success && uploadRes.data) {
-            await staffPortalService.sendMessage(activeConv.id, {
-              text: `Voice note (${duration}s)`,
-              voiceNote: uploadRes.data,
-            });
-          } else {
-            setSendError(
-              uploadRes.error?.message ||
-                'Voice note endpoint (`POST /api/staff/voice-notes`) is not active.'
-            );
-          }
-        };
-        recorder.stop();
+      return;
+    }
+
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    setIsRecording(false);
+
+    const convId = activeConv.id;
+    const duration = Math.max(recordingSecondsRef.current, 1);
+    const recorder = mediaRecorderRef.current;
+    mediaRecorderRef.current = null;
+
+    if (!recorder) return;
+
+    recorder.onstop = async () => {
+      const blob = new Blob(audioChunksRef.current, {
+        type: recorder.mimeType || 'audio/webm',
+      });
+      recorder.stream.getTracks().forEach((t) => t.stop());
+      if (blob.size === 0) return;
+
+      const uploadRes = await staffPortalService.uploadVoiceNote(
+        convId,
+        blob,
+        duration
+      );
+      if (!uploadRes.success || !uploadRes.data) {
+        setSendError(
+          uploadRes.error?.message || 'Voice note upload failed on backend.'
+        );
+        return;
       }
+
+      const voiceNote = uploadRes.data;
+      const attachmentId = voiceNote.attachmentId || voiceNote.id;
+      const clientTempId = `tmp-stf-voice-${Date.now()}`;
+      const timeNow = new Date().toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      const text = `Voice note (${duration}s)`;
+      const optimisticMsg: StaffChatMessage = {
+        id: clientTempId,
+        clientTempId,
+        conversationId: convId,
+        sender: 'agent',
+        agentId: staff.id,
+        agentName: staff.name,
+        text,
+        timestamp: timeNow,
+        status: 'sent',
+        type: 'voice',
+        attachmentId,
+        voiceNote,
+        pending: true,
+      };
+
+      onPatchConversation(convId, (prev) => ({
+        ...prev,
+        messages: [...prev.messages, optimisticMsg],
+        lastMessage: text,
+        lastMessageTimestamp: timeNow,
+      }));
+
+      await dispatchMessagePayload(convId, optimisticMsg, {
+        text,
+        type: 'voice',
+        attachmentId,
+        voiceNote,
+        clientTempId,
+      });
+    };
+
+    try {
+      recorder.stop();
+    } catch {
+      recorder.stream.getTracks().forEach((t) => t.stop());
     }
   };
 
-  const handleInitiateCall = async (mode: 'audio' | 'video') => {
-    if (!activeConv) return;
-    setCallState({
-      open: true,
-      mode,
-      status: 'Initializing signaling...',
-      detail: 'Requesting staff call session from backend...',
-    });
+  const handleToggleVoicePlayback = async (msg: StaffChatMessage) => {
+    if (playingVoiceId === msg.id) {
+      audioPlayerRef.current?.pause();
+      setPlayingVoiceId(null);
+      return;
+    }
 
-    const res = await staffPortalService.initiateCallSession(activeConv.id, mode);
+    const attachmentId =
+      msg.attachmentId || msg.voiceNote?.attachmentId || msg.voiceNote?.id;
+    let audioUrl =
+      msg.voiceNote?.audioUrl && isSafeMediaUrl(msg.voiceNote.audioUrl)
+        ? msg.voiceNote.audioUrl
+        : undefined;
+
+    if (attachmentId) {
+      const res = await staffPortalService.getAttachmentUrl(attachmentId);
+      if (res.success && res.data?.url) {
+        audioUrl = res.data.url;
+      }
+    }
+
+    if (!audioUrl || !isSafeMediaUrl(audioUrl)) {
+      setSendError('Audio playback URL is unavailable for this voice note.');
+      return;
+    }
+
+    if (audioPlayerRef.current) {
+      audioPlayerRef.current.pause();
+    }
+
+    const audio = new Audio(audioUrl);
+    audioPlayerRef.current = audio;
+    setPlayingVoiceId(msg.id);
+    audio.onended = () => setPlayingVoiceId(null);
+    audio.onerror = () => {
+      setPlayingVoiceId(null);
+      setSendError('Unable to decode or stream voice note audio.');
+    };
+    audio.play().catch(() => {
+      setPlayingVoiceId(null);
+    });
+  };
+
+  // Real WebRTC Call Lifecycle Handlers
+  const handleStartCall = async (type: SupportCallType) => {
+    if (!activeConv) return;
+    setCallError(null);
+
+    const res = await staffPortalService.startCall(activeConv.id, type);
+    if (!res.success || !res.data) {
+      setSendError(
+        res.error?.message || 'Unable to start encrypted call session.'
+      );
+      return;
+    }
+
+    const call = res.data;
+    createManagerForCall(call);
+    setActiveCall(call);
+    setCallPhase('outgoing_ringing');
+  };
+
+  const handleAcceptIncomingCall = async () => {
+    if (!activeCall) return;
+    setCallError(null);
+    const manager = createManagerForCall(activeCall);
+    try {
+      await manager.initPeer(true);
+    } catch (err: any) {
+      setCallPhase('error');
+      setCallError(
+        err?.message ||
+          'Microphone/camera permission is required to accept the call.'
+      );
+      return;
+    }
+
+    const res = await staffPortalService.acceptCall(activeCall.id);
     if (res.success && res.data) {
-      setCallState({
-        open: true,
-        mode,
-        status: res.data.status,
-        detail:
-          res.data.providerNote ||
-          `Signaling session ${res.data.id} ready for ${activeConv.customerName}.`,
-      });
+      setActiveCall(res.data);
+      setCallPhase('connecting');
     } else {
-      setCallState({
-        open: true,
-        mode,
-        status: 'signaling_unavailable',
-        detail:
-          res.error?.message ||
-          'WebRTC call signaling (`POST /api/staff/calls/session`) is integration-ready and awaiting backend signaling server.',
-      });
+      cleanupMediaAndCall();
+      setCallPhase('error');
+      setCallError(res.error?.message || 'Failed to accept call on backend.');
+    }
+  };
+
+  const handleRejectIncomingCall = async () => {
+    if (!activeCall) return;
+    await staffPortalService.rejectCall(activeCall.id).catch(() => {});
+    cleanupMediaAndCall();
+    setActiveCall(null);
+    setCallPhase('ended');
+  };
+
+  const handleEndActiveCall = async () => {
+    const call = activeCall;
+    cleanupMediaAndCall();
+    setActiveCall(null);
+    setCallPhase('ended');
+    if (call?.id) {
+      await staffPortalService.endCall(call.id).catch(() => {});
+    }
+  };
+
+  // End Session Handler (Backend permanently closes session & releases capacity)
+  const handleConfirmEndSession = async () => {
+    if (!activeConv || isEndingSession) return;
+    const convId = activeConv.id;
+    setIsEndingSession(true);
+    setEndSessionError(null);
+    try {
+      const res = await staffPortalService.endSession(convId);
+      if (!res.success) {
+        setEndSessionError(
+          res.error?.message || 'Unable to close support session.'
+        );
+        return;
+      }
+      setShowEndSessionModal(false);
+      cleanupMediaAndCall();
+      setActiveCall(null);
+      onRemoveConversation(convId);
+    } finally {
+      setIsEndingSession(false);
     }
   };
 
@@ -556,14 +1185,14 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
 
   return (
     <div ref={splitContainerRef} className="flex-1 min-h-0 flex overflow-hidden">
-      {/* LEFT PANEL: Inbox (Desktop always/collapsible; Mobile full-screen when mobileView==='inbox') */}
+      {/* LEFT PANEL: Inbox */}
       <div
         className={`${
           mobileView === 'inbox' ? 'flex w-full md:w-auto' : 'hidden'
         } md:flex h-full min-h-0 shrink-0`}
       >
         <StaffInboxPanel
-          conversations={conversations}
+          conversations={activeConversations}
           selectedConversationId={activeConv?.id || ''}
           onSelectConversation={handleSelectThread}
           searchQuery={inboxSearch}
@@ -604,11 +1233,11 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
           <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-2">
             <MessageSquare className="w-8 h-8 text-neutral-600" />
             <div className="text-sm font-semibold">
-              {isLoadingData ? 'Loading inbox...' : 'No Conversation Selected'}
+              {isLoadingData ? 'Loading inbox...' : 'No Active Conversations'}
             </div>
             <p className="text-xs text-neutral-500 max-w-sm">
-              Select a client conversation from your scoped inbox to view thread
-              history, AI copilot drafts, and dossier details.
+              Assigned client consultations appear here automatically when routed
+              to your desk.
             </p>
           </div>
         ) : (
@@ -665,7 +1294,7 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
                   </div>
                 </div>
 
-                {/* Right Controls: Search, Calls, Customer Details, Minimize */}
+                {/* Right Controls: Search, Calls, End Session, Customer Details, Minimize */}
                 <div className="flex items-center gap-1 shrink-0">
                   <button
                     type="button"
@@ -685,7 +1314,7 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
 
                   <button
                     type="button"
-                    onClick={() => handleInitiateCall('audio')}
+                    onClick={() => handleStartCall('audio')}
                     title="Voice Call"
                     aria-label="Voice Call"
                     className={`w-7 h-7 sm:w-8 sm:h-8 rounded-lg border flex items-center justify-center cursor-pointer ${
@@ -699,7 +1328,7 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
 
                   <button
                     type="button"
-                    onClick={() => handleInitiateCall('video')}
+                    onClick={() => handleStartCall('video')}
                     title="Video Call"
                     aria-label="Video Call"
                     className={`w-7 h-7 sm:w-8 sm:h-8 rounded-lg border flex items-center justify-center cursor-pointer ${
@@ -709,6 +1338,24 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
                     }`}
                   >
                     <Video className="w-3.5 h-3.5" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEndSessionError(null);
+                      setShowEndSessionModal(true);
+                    }}
+                    title="End Support Session"
+                    aria-label="End Support Session"
+                    className={`h-7 sm:h-8 px-2 rounded-lg border flex items-center gap-1 text-[11px] font-medium cursor-pointer transition-colors ${
+                      isLight
+                        ? 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100'
+                        : 'border-rose-500/30 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20'
+                    }`}
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span className="hidden lg:inline">End Session</span>
                   </button>
 
                   <button
@@ -730,8 +1377,12 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
                   <button
                     type="button"
                     onClick={() => setHeaderMinimized((prev) => !prev)}
-                    title={headerMinimized ? 'Expand title bar' : 'Minimize title bar'}
-                    aria-label={headerMinimized ? 'Expand title bar' : 'Minimize title bar'}
+                    title={
+                      headerMinimized ? 'Expand title bar' : 'Minimize title bar'
+                    }
+                    aria-label={
+                      headerMinimized ? 'Expand title bar' : 'Minimize title bar'
+                    }
                     className={`w-7 h-7 sm:w-8 sm:h-8 rounded-lg border flex items-center justify-center cursor-pointer ${
                       isLight
                         ? 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
@@ -865,7 +1516,12 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
               <>
                 {/* Independently Scrollable Message Feed */}
                 <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 lg:p-5 space-y-3">
-                  {visibleMessages.length === 0 ? (
+                  {isLoadingMessages && visibleMessages.length === 0 ? (
+                    <div className="py-12 flex items-center justify-center gap-2 text-xs text-neutral-500">
+                      <Loader2 className="w-4 h-4 animate-spin text-emerald-500" />
+                      <span>Loading conversation messages...</span>
+                    </div>
+                  ) : visibleMessages.length === 0 ? (
                     <div className="py-12 text-center text-xs text-neutral-500">
                       {qMsg
                         ? `No messages matching "${msgSearchQuery}".`
@@ -892,7 +1548,9 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
                         );
                       }
 
-                      const isWhisper = Boolean(msg.isWhisper || msg.isPrivateNote);
+                      const isWhisper = Boolean(
+                        msg.isWhisper || msg.isPrivateNote
+                      );
 
                       return (
                         <div
@@ -946,7 +1604,9 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
                                 <input
                                   type="text"
                                   value={editingText}
-                                  onChange={(e) => setEditingText(e.target.value)}
+                                  onChange={(e) =>
+                                    setEditingText(e.target.value)
+                                  }
                                   className="w-full px-2.5 py-1.5 rounded-lg bg-neutral-950 text-neutral-100 border border-neutral-700 text-xs"
                                 />
                                 <div className="flex justify-end gap-1.5">
@@ -968,31 +1628,83 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
                               </div>
                             ) : (
                               <>
-                                <p className="whitespace-pre-line">{msg.text}</p>
+                                <p className="whitespace-pre-line">
+                                  {msg.text}
+                                </p>
                                 {msg.attachment && (
-                                  <div className="mt-2 px-2.5 py-1.5 rounded-lg bg-black/20 text-[11px] font-mono">
-                                    📎 {msg.attachment.name} ({msg.attachment.size})
-                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenAttachment(msg)}
+                                    className="mt-2 w-full text-left px-2.5 py-1.5 rounded-lg bg-black/20 hover:bg-black/30 text-[11px] font-mono flex items-center justify-between gap-2 cursor-pointer transition-colors"
+                                  >
+                                    <span className="truncate">
+                                      📎 {msg.attachment.name}{' '}
+                                      {msg.attachment.size
+                                        ? `(${msg.attachment.size})`
+                                        : ''}
+                                    </span>
+                                    <Download className="w-3.5 h-3.5 shrink-0" />
+                                  </button>
                                 )}
                                 {msg.voiceNote && (
-                                  <div className="mt-2 px-2.5 py-1.5 rounded-lg bg-black/20 text-[11px] font-mono">
-                                    🎙 Voice Note ({msg.voiceNote.durationSeconds}s)
-                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleToggleVoicePlayback(msg)
+                                    }
+                                    className="mt-2 w-full px-2.5 py-1.5 rounded-lg bg-black/20 hover:bg-black/30 text-[11px] font-mono flex items-center justify-between gap-2 cursor-pointer transition-colors"
+                                  >
+                                    <span className="flex items-center gap-1.5">
+                                      {playingVoiceId === msg.id ? (
+                                        <Pause className="w-3.5 h-3.5 shrink-0" />
+                                      ) : (
+                                        <Play className="w-3.5 h-3.5 shrink-0" />
+                                      )}
+                                      <span>
+                                        Voice Note (
+                                        {msg.voiceNote.durationSeconds}s)
+                                      </span>
+                                    </span>
+                                    <span className="text-[10px] opacity-80">
+                                      {playingVoiceId === msg.id
+                                        ? 'Playing'
+                                        : 'Play'}
+                                    </span>
+                                  </button>
                                 )}
                               </>
                             )}
                           </div>
 
-                          {/* Reactions + Read Receipt + Hover Message Actions */}
+                          {/* Reactions + Read Receipt + Hover Message Actions / Retry */}
                           <div className="mt-1 flex items-center gap-2 text-[10px] text-neutral-500">
                             {isAgent && !msg.deletedAt && (
                               <span className="flex items-center gap-0.5 font-mono">
-                                {msg.status === 'read' ? (
-                                  <CheckCheck className="w-3 h-3 text-emerald-400" />
+                                {msg.failed ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleRetryFailedMessage(msg)
+                                    }
+                                    className="flex items-center gap-1 text-rose-400 hover:text-rose-300 font-semibold cursor-pointer"
+                                  >
+                                    <RotateCcw className="w-3 h-3" />
+                                    <span>Retry</span>
+                                  </button>
+                                ) : msg.pending ? (
+                                  <span>Sending...</span>
                                 ) : (
-                                  <Check className="w-3 h-3" />
+                                  <>
+                                    {msg.status === 'read' ? (
+                                      <CheckCheck className="w-3 h-3 text-emerald-400" />
+                                    ) : msg.status === 'delivered' ? (
+                                      <CheckCheck className="w-3 h-3 text-neutral-400" />
+                                    ) : (
+                                      <Check className="w-3 h-3" />
+                                    )}
+                                    <span>{msg.status}</span>
+                                  </>
                                 )}
-                                <span>{msg.status}</span>
                               </span>
                             )}
 
@@ -1002,7 +1714,9 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
                                   <button
                                     key={r.emoji}
                                     type="button"
-                                    onClick={() => handleReactMessage(msg.id, r.emoji)}
+                                    onClick={() =>
+                                      handleReactMessage(msg.id, r.emoji)
+                                    }
                                     className="px-1.5 py-0.5 rounded bg-neutral-900 border border-neutral-800 text-[10px] cursor-pointer"
                                   >
                                     {r.emoji} {r.count}
@@ -1011,7 +1725,7 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
                               </div>
                             )}
 
-                            {!msg.deletedAt && (
+                            {!msg.deletedAt && !msg.pending && !msg.failed && (
                               <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity relative">
                                 <button
                                   type="button"
@@ -1054,7 +1768,9 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
                                       <button
                                         key={em}
                                         type="button"
-                                        onClick={() => handleReactMessage(msg.id, em)}
+                                        onClick={() =>
+                                          handleReactMessage(msg.id, em)
+                                        }
                                         className="px-1 hover:scale-110 transition-transform cursor-pointer"
                                       >
                                         {em}
@@ -1227,7 +1943,11 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
                         value={activeDraft}
                         onChange={(e) => handleDraftChange(e.target.value)}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey && !showCannedMenu) {
+                          if (
+                            e.key === 'Enter' &&
+                            !e.shiftKey &&
+                            !showCannedMenu
+                          ) {
                             e.preventDefault();
                             handleSendMessage();
                           }
@@ -1251,7 +1971,8 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
                       <button
                         type="submit"
                         disabled={
-                          isSending || (!activeDraft.trim() && !pendingAttachment)
+                          isSending ||
+                          (!activeDraft.trim() && !pendingAttachment)
                         }
                         className={`h-10 px-3.5 rounded-xl font-semibold text-xs flex items-center gap-1.5 shrink-0 cursor-pointer disabled:opacity-40 ${
                           isWhisperDraft
@@ -1286,9 +2007,12 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
           isOpen={detailsOpen}
           onClose={() => setDetailsOpen(false)}
           onUpdateConversationStatus={async (st) => {
-            const res = await staffPortalService.updateConversation(activeConv.id, {
-              status: st,
-            });
+            const res = await staffPortalService.updateConversation(
+              activeConv.id,
+              {
+                status: st,
+              }
+            );
             if (res.success) {
               onUpdateConversation({ ...activeConv, status: st });
             } else {
@@ -1298,9 +2022,12 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
             }
           }}
           onSaveInternalNotes={async (notes) => {
-            const res = await staffPortalService.updateConversation(activeConv.id, {
-              internalNotes: notes,
-            });
+            const res = await staffPortalService.updateConversation(
+              activeConv.id,
+              {
+                internalNotes: notes,
+              }
+            );
             if (res.success) {
               onUpdateConversation({ ...activeConv, internalNotes: notes });
               return { ok: true };
@@ -1313,53 +2040,51 @@ export const StaffConversationsPage: React.FC<StaffConversationsPageProps> = ({
         />
       )}
 
-      {/* Call Signaling Readiness Modal */}
-      {callState?.open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75">
-          <div
-            className={`w-full max-w-sm rounded-2xl border p-5 space-y-4 shadow-2xl ${
-              isLight
-                ? 'bg-white border-slate-200 text-slate-900'
-                : 'bg-neutral-900 border-neutral-800 text-neutral-100'
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm font-bold">
-                {callState.mode === 'video' ? (
-                  <Video className="w-4 h-4 text-emerald-500" />
-                ) : (
-                  <Phone className="w-4 h-4 text-emerald-500" />
-                )}
-                <span>
-                  {callState.mode === 'video' ? 'Video Call' : 'Voice Call'} Signaling
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setCallState(null)}
-                className="p-1 text-neutral-400 hover:text-neutral-200"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {/* Real WebRTC Voice / Video Call Overlay */}
+      <SupportCallOverlay
+        call={activeCall}
+        phase={callPhase}
+        peerName={
+          activeConv?.customerName ||
+          activeCall?.initiatorName ||
+          'Private Client'
+        }
+        errorDetail={callError}
+        localStream={localStream}
+        remoteStream={remoteStream}
+        onAccept={handleAcceptIncomingCall}
+        onReject={handleRejectIncomingCall}
+        onEnd={handleEndActiveCall}
+        onDismiss={() => {
+          cleanupMediaAndCall();
+          setActiveCall(null);
+          setCallPhase('ended');
+          setCallError(null);
+        }}
+        onToggleMute={(muted) => callManagerRef.current?.setMuted(muted)}
+        onToggleVideo={(enabled) =>
+          callManagerRef.current?.setVideoEnabled(enabled)
+        }
+        theme={theme}
+      />
 
-            <div className="text-xs font-mono text-amber-400">
-              Status: {callState.status}
-            </div>
-            <p className="text-xs text-neutral-400 leading-relaxed">
-              {callState.detail}
-            </p>
-
-            <button
-              type="button"
-              onClick={() => setCallState(null)}
-              className="w-full py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-xs font-semibold text-neutral-100 cursor-pointer"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      )}
+      {/* End Session Confirmation Modal */}
+      <EndSessionConfirmModal
+        isOpen={showEndSessionModal}
+        subject={
+          activeConv
+            ? `${activeConv.customerName} — ${activeConv.subject}`
+            : undefined
+        }
+        isSubmitting={isEndingSession}
+        errorMessage={endSessionError}
+        role="staff"
+        onCancel={() => {
+          if (!isEndingSession) setShowEndSessionModal(false);
+        }}
+        onConfirm={handleConfirmEndSession}
+        theme={theme}
+      />
     </div>
   );
 };

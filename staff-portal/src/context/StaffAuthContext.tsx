@@ -17,10 +17,12 @@ import {
   readStoredSidebarMode,
   writeStoredSidebarMode,
 } from '@/src/components/SidebarDisplayControl';
-import {
-  STAFF_PORTAL_NOTIFICATION_PREFERENCES,
-  STAFF_PORTAL_PREVIEW_PROFILE,
-} from '@/src/data/mockData';
+import mockDataJson from '@/src/data/mockData.json';
+
+const JSON_NOTIFICATION_PREFERENCES =
+  mockDataJson.staffPortalNotificationPreferences as StaffNotificationPreferences;
+const JSON_PREVIEW_PROFILE =
+  mockDataJson.staffPortalPreviewProfile as StaffMemberProfile;
 
 interface StaffAuthContextValue {
   /** Active profile (verified backend staff session, or dev-only preview profile when isPreviewMode is true). */
@@ -74,7 +76,7 @@ export const StaffAuthProvider: React.FC<{
     useState<RealtimeConnectionStatus>('idle');
   const [realtimeDetail, setRealtimeDetail] = useState<string | undefined>(undefined);
   const [notificationPrefs, setNotificationPrefs] =
-    useState<StaffNotificationPreferences>(STAFF_PORTAL_NOTIFICATION_PREFERENCES);
+    useState<StaffNotificationPreferences>(JSON_NOTIFICATION_PREFERENCES);
 
   const isAuthenticated = Boolean(verifiedStaff);
   const isPreviewMode = !isAuthenticated && Boolean(previewStaff);
@@ -150,7 +152,7 @@ export const StaffAuthProvider: React.FC<{
     refreshSession();
   }, [refreshSession]);
 
-  // Load saved notification preferences when workspace opens
+  // Load saved notification preferences & live availability when authenticated
   useEffect(() => {
     if (!staff) return;
     let active = true;
@@ -159,10 +161,31 @@ export const StaffAuthProvider: React.FC<{
         setNotificationPrefs(res.data);
       }
     });
+    if (verifiedStaff?.id) {
+      staffPortalService.getAvailability().then((res) => {
+        if (!active || !res.success || !res.data) return;
+        setVerifiedStaff((prev) =>
+          prev
+            ? {
+                ...prev,
+                availability: res.data!.availability || prev.availability,
+                activeChatsCount:
+                  typeof res.data!.activeChatsCount === 'number'
+                    ? res.data!.activeChatsCount
+                    : prev.activeChatsCount,
+                maxChats:
+                  typeof res.data!.maxChats === 'number'
+                    ? res.data!.maxChats
+                    : prev.maxChats,
+              }
+            : null
+        );
+      });
+    }
     return () => {
       active = false;
     };
-  }, [staff?.id]);
+  }, [staff?.id, verifiedStaff?.id]);
 
   // Listen for 401 session expiration from any authenticated Staff API call
   useEffect(() => {
@@ -231,7 +254,7 @@ export const StaffAuthProvider: React.FC<{
 
   const enterDevPreviewMode = useCallback(() => {
     if (typeof import.meta === 'undefined' || !import.meta.env?.DEV) return;
-    setPreviewStaff(STAFF_PORTAL_PREVIEW_PROFILE);
+    setPreviewStaff(JSON_PREVIEW_PROFILE);
     setSessionExpiredMessage(null);
     onNavigate(STAFF_CONFIG.routes.dashboard, true);
   }, [onNavigate]);

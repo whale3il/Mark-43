@@ -43,7 +43,11 @@ export const StaffInboxPanel: React.FC<StaffInboxPanelProps> = ({
 
   const q = searchQuery.trim().toLowerCase();
   const filtered = conversations.filter((c) => {
-    const matchesStatus = statusFilter === 'All' || c.status === statusFilter;
+    const matchesStatus =
+      statusFilter === 'All' ||
+      (statusFilter === 'pending'
+        ? c.status === 'pending' || c.status === 'waiting'
+        : c.status === statusFilter);
     const matchesSearch =
       !q ||
       c.customerName.toLowerCase().includes(q) ||
@@ -263,12 +267,12 @@ export const StaffInboxPanel: React.FC<StaffInboxPanelProps> = ({
                       className={`capitalize font-semibold ${
                         conv.status === 'active'
                           ? 'text-emerald-400'
-                          : conv.status === 'pending'
+                          : conv.status === 'pending' || conv.status === 'waiting'
                           ? 'text-amber-400'
                           : 'text-sky-400'
                       }`}
                     >
-                      {conv.status}
+                      {conv.status === 'waiting' ? 'In Queue' : conv.status}
                     </span>
                     {conv.linkedTicketId && (
                       <span className="flex items-center gap-0.5 truncate">

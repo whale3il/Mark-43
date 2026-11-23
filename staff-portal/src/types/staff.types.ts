@@ -1,6 +1,7 @@
 import type {
   SupportAgent,
   SupportConversation,
+  SupportConversationStatus,
   SupportMessage,
   SupportTicket,
   CustomerProfile,
@@ -11,11 +12,15 @@ import type {
   SupportAttachment,
   VoiceNoteData,
   SupportDepartment,
+  SupportCallSession,
+  SupportCallSignalPayload,
+  SupportCallType,
 } from '@/src/types/support';
 
 export type {
   SupportAgent,
   SupportConversation,
+  SupportConversationStatus,
   SupportMessage,
   SupportTicket,
   CustomerProfile,
@@ -26,6 +31,9 @@ export type {
   SupportAttachment,
   VoiceNoteData,
   SupportDepartment,
+  SupportCallSession,
+  SupportCallSignalPayload,
+  SupportCallType,
 };
 
 export type StaffAvailabilityEnum = 'ONLINE' | 'BUSY' | 'AWAY' | 'OFFLINE';
