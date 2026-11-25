@@ -256,48 +256,13 @@ class AblySupportService {
    * Simulation helper: auto reply from assigned staff specialist
    * Used when a customer sends a message in client view and tests real-time feedback
    */
-  public simulateStaffReply(
+  public async updateStaffStatus(
     conversationId: string,
-    agent: SupportAgent,
-    customerPrompt: string,
-    onMessageCreated: (msg: SupportMessage) => void
-  ): void {
-    // 1. Trigger typing indicator after 800ms
-    setTimeout(() => {
-      this.setTyping(conversationId, agent.id, true, agent.name);
-
-      // 2. Clear typing and dispatch contextual reply after 2.4s
-      setTimeout(() => {
-        this.setTyping(conversationId, agent.id, false, agent.name);
-
-        let replyText = `Thank you for contacting my desk. I am reviewing your request regarding "${customerPrompt.slice(0, 40)}..." and will update your portfolio ledger momentarily.`;
-
-        const lower = customerPrompt.toLowerCase();
-        if (lower.includes('wire') || lower.includes('transfer') || lower.includes('fedwire')) {
-          replyText = `Understood. I have initiated the Fedwire Realtime pre-clearance check for your transfer. Expected settlement window is within 15 minutes.`;
-        } else if (lower.includes('card') || lower.includes('limit') || lower.includes('obsidian')) {
-          replyText = `I have received your card threshold adjustment inquiry. Your Obsidian limit elevation has been temporarily queued for compliance verification.`;
-        } else if (lower.includes('yield') || lower.includes('treasury') || lower.includes('sweep')) {
-          replyText = `Your treasury allocation instructions have been recorded. At 4.85% APY, this sweep accrues daily with compounding at month-end.`;
-        } else if (lower.includes('key') || lower.includes('fido') || lower.includes('security')) {
-          replyText = `Security operations have verified your active session. Cryptographic dual-key authorization remains active.`;
-        }
-
-        const replyMsg: SupportMessage = {
-          id: `m-reply-${Date.now()}`,
-          conversationId,
-          sender: 'agent',
-          agentId: agent.id,
-          agentName: agent.name,
-          text: replyText,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          status: 'delivered'
-        };
-
-        this.publishMessage(conversationId, replyMsg);
-        onMessageCreated(replyMsg);
-      }, 2000);
-    }, 800);
+    staffId: string,
+    isOnline: boolean,
+    name?: string
+  ): Promise<void> {
+    await this.setTyping(conversationId, staffId, isOnline, name);
   }
 }
 

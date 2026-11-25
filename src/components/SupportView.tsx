@@ -205,7 +205,6 @@ export const SupportView: React.FC<SupportViewProps> = ({
               }
             : c
         );
-        onUpdateConversations?.(nextList);
         return nextList;
       });
     });
@@ -224,13 +223,31 @@ export const SupportView: React.FC<SupportViewProps> = ({
     };
   }, [activeConversation?.id, customerId, customerName]);
 
+  // Notify App after state commits, never from inside a React state updater.
+  useEffect(() => {
+    onUpdateConversations?.(conversations);
+  }, [conversations]);
+
   const updateConversationInState = (updatedConv: SupportConversation) => {
     setConversations((prev) => {
       const next = prev.map((c) => (c.id === updatedConv.id ? updatedConv : c));
-      onUpdateConversations?.(next);
       return next;
     });
   };
+
+  // Load persisted history whenever the selected conversation changes.
+  useEffect(() => {
+    if (!activeConversation?.id) return;
+    const id = activeConversation.id;
+    let cancelled = false;
+    void SupportService.getMessages(id).then((result) => {
+      if (cancelled || !result.success || !result.data) return;
+      setConversations((prev) => prev.map((conv) =>
+        conv.id === id ? { ...conv, messages: result.data! } : conv
+      ));
+    });
+    return () => { cancelled = true; };
+  }, [activeConversation?.id]);
 
   // Mark conversation as read on select
   const handleSelectConversation = (id: string) => {
@@ -243,31 +260,9 @@ export const SupportView: React.FC<SupportViewProps> = ({
     }
   };
 
-  // Start or open conversation with a specific staff member
-  const handleSelectStaffMember = async (agent: SupportAgent) => {
-    const existing = customerConversations.find((c) => c.agent.id === agent.id);
-    if (existing) {
-      handleSelectConversation(existing.id);
-      return;
-    }
-
-    const res = await SupportService.createConversation({
-      customerId,
-      customerName,
-      customerTier,
-      agent,
-      category: 'General Support',
-      subject: `Private Consultation with ${agent.name}`,
-      initialMessage: `Consultation channel initialized with ${agent.name} (${agent.department}).`
-    });
-
-    if (res.success && res.data) {
-      const updated = [res.data, ...conversations];
-      setConversations(updated);
-      onUpdateConversations?.(updated);
-      setSelectedConversationId(res.data.id);
-      setMobilePane('chat');
-    }
+  // A staff click opens the inquiry form; backend still controls assignment.
+  const handleSelectStaffMember = (_agent: SupportAgent) => {
+    setShowWelcomeModal(true);
   };
 
   // Send Message from Customer
@@ -298,32 +293,45 @@ export const SupportView: React.FC<SupportViewProps> = ({
     };
     updateConversationInState(updated);
 
-    await SupportService.sendMessage(activeConversation.id, newMsg);
-    ablyService.publishMessage(activeConversation.id, newMsg);
-
-    // Real-time staff response hook via service
-    ablyService.simulateStaffReply(
-      activeConversation.id,
-      activeConversation.agent,
-      userPrompt,
-      (reply) => {
-        setConversations((prev) => {
-          const fresh = prev.find((c) => c.id === activeConversation.id);
-          if (fresh && !fresh.messages.some((m) => m.id === reply.id)) {
-            const nextConv = {
-              ...fresh,
-              messages: [...fresh.messages, reply],
-              lastMessage: reply.text,
-              lastMessageTimestamp: reply.timestamp
-            };
-            const nextList = prev.map((c) => (c.id === nextConv.id ? nextConv : c));
-            onUpdateConversations?.(nextList);
-            return nextList;
-          }
-          return prev;
-        });
+    // The backend persists the message and publishes its Ably event.
+    // Do not publish the same message directly from the browser.
+    try {
+      const result = await SupportService.sendMessage(activeConversation.id, newMsg);
+      if (!result.success) {
+        setConversations((prev) =>
+          prev.map((conversation) =>
+            conversation.id === activeConversation.id
+              ? {
+                  ...conversation,
+                  messages: conversation.messages.filter((message) => message.id !== newMsg.id)
+                }
+              : conversation
+          )
+        );
+        setInputText(userPrompt);
+        console.error('Support message was not saved:', result.error);
+      } else if (result.data) {
+        const persisted = result.data;
+        setConversations((prev) => prev.map((conv) => {
+          if (conv.id !== activeConversation.id) return conv;
+          const withoutTemporary = conv.messages.filter((msg) => msg.id !== newMsg.id && msg.id !== persisted.id);
+          return { ...conv, messages: [...withoutTemporary, persisted], lastMessage: persisted.text, lastMessageTimestamp: persisted.timestamp };
+        }));
       }
-    );
+    } catch (error) {
+      setConversations((prev) =>
+        prev.map((conversation) =>
+          conversation.id === activeConversation.id
+            ? {
+                ...conversation,
+                messages: conversation.messages.filter((message) => message.id !== newMsg.id)
+              }
+            : conversation
+        )
+      );
+      setInputText(userPrompt);
+      console.error('Failed to send support message:', error);
+    }
   };
 
   // Voice note recording
@@ -365,53 +373,46 @@ export const SupportView: React.FC<SupportViewProps> = ({
     }
   };
 
-  // New Inquiry Flow completion
+  // New Inquiry Flow: accept WAITING as a created conversation; no fake staff assignment.
   const handleStartInquiry = async (params: {
     category: InquiryCategory;
     subject: string;
     initialMessage: string;
     agentId: string;
-  }) => {
+  }): Promise<boolean> => {
     const targetAgent = staff.find((s) => s.id === params.agentId) || staff[0];
-    if (!targetAgent) return;
+    if (!targetAgent || !currentCustomer?.id) return false;
 
-    const res = await SupportService.createConversation({
-      customerId,
-      customerName,
-      customerTier,
+    const result = await SupportService.createConversation({
+      customerId, customerName, customerTier,
       agent: targetAgent,
       category: params.category,
       subject: params.subject,
-      initialMessage: params.initialMessage
+      initialMessage: params.initialMessage,
     });
-
-    if (res.success && res.data) {
-      const newConv = res.data;
-      const nextList = [newConv, ...conversations];
-      setConversations(nextList);
-      onUpdateConversations?.(nextList);
-      setSelectedConversationId(newConv.id);
-      setActiveSubTab('chat');
-      setMobilePane('chat');
-
-      ablyService.simulateStaffReply(newConv.id, targetAgent, params.initialMessage, (reply) => {
-        setConversations((prev) => {
-          const fresh = prev.find((c) => c.id === newConv.id);
-          if (fresh && !fresh.messages.some((m) => m.id === reply.id)) {
-            const nextConv = {
-              ...fresh,
-              messages: [...fresh.messages, reply],
-              lastMessage: reply.text,
-              lastMessageTimestamp: reply.timestamp
-            };
-            const updated = prev.map((c) => (c.id === nextConv.id ? nextConv : c));
-            onUpdateConversations?.(updated);
-            return updated;
-          }
-          return prev;
-        });
-      });
+    if (!result.success || !result.data) {
+      console.error('Creating support conversation failed:', result.error);
+      return false;
     }
+    const created = result.data;
+    // Opening message is not saved by the create endpoint: send it explicitly.
+    const opening: SupportMessage = {
+      id: '', conversationId: created.id, sender: 'customer',
+      text: params.initialMessage, timestamp: '', status: 'sent',
+    };
+    const sent = await SupportService.sendMessage(created.id, opening);
+    if (!sent.success) {
+      // Conversation exists even if opening message fails; do not silently lose it.
+      console.error('Conversation created but initial message was not saved:', sent.error);
+    }
+    const ready = sent.success && sent.data
+      ? { ...created, messages: [sent.data], lastMessage: sent.data.text, lastMessageTimestamp: sent.data.timestamp }
+      : created;
+    setConversations((prev) => [ready, ...prev.filter((c) => c.id !== ready.id)]);
+    setSelectedConversationId(ready.id);
+    setActiveSubTab('chat');
+    setMobilePane('chat');
+    return true;
   };
 
   // Create Ticket Submit

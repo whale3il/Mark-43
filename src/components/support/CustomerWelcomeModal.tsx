@@ -23,7 +23,7 @@ interface CustomerWelcomeModalProps {
     subject: string;
     initialMessage: string;
     agentId: string;
-  }) => void;
+  }) => Promise<boolean>;
   theme?: 'dark' | 'light';
 }
 
@@ -78,6 +78,8 @@ export const CustomerWelcomeModal: React.FC<CustomerWelcomeModalProps> = ({
   const [autoAssign, setAutoAssign] = useState<boolean>(true);
   const [subject, setSubject] = useState<string>('');
   const [message, setMessage] = useState<string>('');
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [connectionError, setConnectionError] = useState('');
 
   if (!isOpen) return null;
 
@@ -88,20 +90,34 @@ export const CustomerWelcomeModal: React.FC<CustomerWelcomeModalProps> = ({
       (a) => a.department === targetCategoryInfo?.recommendedDepartment && a.status === 'online'
     ) || staffList.find((a) => a.status === 'online') || staffList[0];
 
-  const effectiveAgentId = autoAssign ? matchedAgent.id : selectedAgentId || matchedAgent.id;
+  const effectiveAgentId = autoAssign
+    ? matchedAgent?.id ?? ''
+    : selectedAgentId || matchedAgent?.id || '';
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!subject.trim() || !message.trim()) return;
+    if (!subject.trim() || !message.trim() || isConnecting) return;
 
-    onStartInquiry({
-      category: selectedCategory,
-      subject: subject.trim(),
-      initialMessage: message.trim(),
-      agentId: effectiveAgentId
-    });
+    setIsConnecting(true);
+    setConnectionError('');
 
-    onClose();
+    try {
+      const connected = await onStartInquiry({
+        category: selectedCategory,
+        subject: subject.trim(),
+        initialMessage: message.trim(),
+        agentId: effectiveAgentId
+      });
+      if (connected === true) {
+        onClose();
+      } else {
+        setConnectionError('Could not open the conversation. Please try again.');
+      }
+    } catch (error) {
+      setConnectionError(error instanceof Error ? error.message : 'Connection failed. Please try again.');
+    } finally {
+      setIsConnecting(false);
+    }
   };
 
   return (
@@ -205,22 +221,22 @@ export const CustomerWelcomeModal: React.FC<CustomerWelcomeModalProps> = ({
               >
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-400 font-bold flex items-center justify-center text-xs border border-emerald-500/30">
-                    {matchedAgent.initials}
+                    {matchedAgent?.initials ?? '--'}
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold">{matchedAgent.name}</span>
+                      <span className="text-xs font-semibold">{matchedAgent?.name ?? 'No specialists available'}</span>
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                        {matchedAgent.status}
+                        {matchedAgent?.status ?? 'offline'}
                       </span>
                     </div>
                     <div className={`text-[11px] ${isLight ? 'text-slate-500' : 'text-neutral-400'}`}>
-                      {matchedAgent.role} · {matchedAgent.specialization}
+                      {matchedAgent?.role ?? 'Support'} · {matchedAgent?.specialization ?? 'Unavailable'}
                     </div>
                   </div>
                 </div>
                 <span className="text-[11px] font-mono text-emerald-500 font-medium">
-                  {matchedAgent.responseTime}
+                  {matchedAgent?.responseTime ?? '—'}
                 </span>
               </div>
             ) : (
@@ -287,6 +303,11 @@ export const CustomerWelcomeModal: React.FC<CustomerWelcomeModalProps> = ({
 
           {/* Modal Footer */}
           <div className="pt-2 flex items-center justify-end gap-3">
+            {connectionError && (
+              <p role="alert" className="mr-auto text-xs text-rose-400">
+                {connectionError}
+              </p>
+            )}
             <button
               type="button"
               onClick={onClose}
@@ -298,10 +319,11 @@ export const CustomerWelcomeModal: React.FC<CustomerWelcomeModalProps> = ({
             </button>
             <button
               type="submit"
-              className="px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-neutral-950 font-semibold text-xs transition-all shadow-md flex items-center gap-2 cursor-pointer"
+              disabled={isConnecting}
+              className="px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed text-neutral-950 font-semibold text-xs transition-all shadow-md flex items-center gap-2 cursor-pointer"
             >
               <Send className="w-3.5 h-3.5" />
-              <span>Connect with Desk</span>
+              <span>{isConnecting ? 'Connecting...' : 'Connect with Desk'}</span>
             </button>
           </div>
         </form>

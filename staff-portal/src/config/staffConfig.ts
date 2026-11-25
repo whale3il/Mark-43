@@ -124,10 +124,9 @@ export const STAFF_CONFIG = {
      * Confirm the actual backend routes during Ably integration.
      */
     ably: {
-      token: '/staff/ably/token',
-
-      fallbackToken: '/support/ably/token',
-    },
+  token: '/ably/token',
+  fallbackToken: '/ably/token',
+},
 
     /**
      * Staff operations.

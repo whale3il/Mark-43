@@ -1095,7 +1095,7 @@ class StaffAblyService {
    */
   public saveInternalNotes(
     conversationId: string,
-    notes: string
+    notes: string 
   ) {
     return this.requireApi()
       .saveInternalNotes(

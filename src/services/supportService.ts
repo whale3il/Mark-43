@@ -64,10 +64,72 @@ export class SupportService {
     };
   }
 
-  /**
-   * POST /api/support/conversations
-   * Creates a new private support conversation room & linked ticket.
-   */
+  /** Backend conversation and message shapes. These records are intentionally not UI-shaped. */
+  static normalizeMessage(raw: any, conversationId: string): SupportMessage {
+    const role = raw?.sender?.role;
+    return {
+      id: String(raw?.id || ''),
+      conversationId: String(raw?.conversationId || conversationId),
+      sender: role === 'CUSTOMER' ? 'customer' : role === 'STAFF' ? 'agent' : 'system',
+      text: String(raw?.content ?? ''),
+      timestamp: raw?.createdAt
+        ? new Date(raw.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : '',
+      status: 'sent',
+      agentId: role === 'STAFF' ? raw?.senderId : undefined,
+      agentName: role === 'STAFF'
+        ? [raw?.sender?.firstName, raw?.sender?.lastName].filter(Boolean).join(' ')
+        : undefined,
+    };
+  }
+
+  static normalizeConversation(
+    raw: any,
+    context: { customerId: string; customerName: string; customerTier: string; staffList?: SupportAgent[]; agent?: SupportAgent; subject?: string; category?: InquiryCategory }
+  ): SupportConversation {
+    const participants = Array.isArray(raw?.participants) ? raw.participants : [];
+    const customerParticipant = participants.find((p: any) => p?.user?.role === 'CUSTOMER');
+    const staffParticipant = participants.find((p: any) => p?.user?.role === 'STAFF');
+    const assignedId = raw?.assignedStaffId || staffParticipant?.userId;
+    const directoryStaff = context.staffList?.find((s) => s.id === assignedId);
+    const participantName = staffParticipant?.user
+      ? [staffParticipant.user.firstName, staffParticipant.user.lastName].filter(Boolean).join(' ')
+      : '';
+    const fallbackAgent: SupportAgent = {
+      id: assignedId || '',
+      name: assignedId ? (participantName || 'Assigned specialist') : 'Waiting for available specialist',
+      initials: assignedId ? (participantName.split(/\s+/).map((p: string) => p[0]).slice(0, 2).join('').toUpperCase() || 'SS') : '…',
+      role: 'Support Specialist',
+      department: 'Private Wealth',
+      specialization: '',
+      status: 'offline',
+      responseTime: '—', license: '', office: '', directPhone: '', email: '',
+      activeConversationsCount: 0, availabilityLabel: 'WAITING',
+    };
+    // Never label an unassigned waiting conversation as connected to the selected agent.
+    const agent = directoryStaff || (assignedId && context.agent?.id === assignedId ? context.agent : fallbackAgent);
+    const messages = Array.isArray(raw?.messages)
+      ? raw.messages.map((m: any) => this.normalizeMessage(m, raw.id))
+      : [];
+    const last = messages[messages.length - 1];
+    return {
+      id: String(raw?.id || ''),
+      customerId: String(customerParticipant?.userId || context.customerId),
+      customerName: context.customerName,
+      customerTier: context.customerTier,
+      agent,
+      subject: context.subject || 'Support inquiry',
+      category: context.category || 'General Support',
+      department: agent.department,
+      status: raw?.status === 'CLOSED' ? 'resolved' : raw?.status === 'ACTIVE' || raw?.status === 'ASSIGNED' ? 'active' : 'pending',
+      messages,
+      lastMessage: last?.text || (raw?.status === 'WAITING' ? 'Waiting for an available specialist' : 'Conversation opened'),
+      lastMessageTimestamp: last?.timestamp || (raw?.createdAt ? new Date(raw.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''),
+      unreadCount: 0,
+      createdAt: raw?.createdAt,
+    };
+  }
+
   static async createConversation(payload: {
     customerId: string;
     customerName: string;
@@ -77,69 +139,34 @@ export class SupportService {
     subject: string;
     initialMessage: string;
   }): Promise<ApiResponse<SupportConversation>> {
-    const res = await apiRequest<SupportConversation>('/support/conversations', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    });
-
-    if (res.success && res.data) {
-      return res;
-    }
-
-    const convId = `conv-${Date.now()}`;
-    const timeNow = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const newConv: SupportConversation = {
-      id: convId,
-      agent: payload.agent,
-      customerId: payload.customerId,
-      customerName: payload.customerName,
-      customerTier: payload.customerTier,
-      subject: payload.subject,
-      department: payload.agent.department,
-      category: payload.category,
-      lastMessage: payload.initialMessage,
-      lastMessageTimestamp: timeNow,
-      unreadCount: 0,
-      status: 'active',
-      linkedTicketId: `TKT-${Math.floor(1000 + Math.random() * 9000)}-NY`,
-      messages: [
-        {
-          id: `m-sys-${Date.now()}`,
-          conversationId: convId,
-          sender: 'system',
-          text: `Secure desk opened with ${payload.agent.name} (${payload.agent.role}). Category: ${payload.category}.`,
-          timestamp: timeNow,
-          status: 'read'
-        },
-        {
-          id: `m-usr-${Date.now()}`,
-          conversationId: convId,
-          sender: 'customer',
-          text: payload.initialMessage,
-          timestamp: timeNow,
-          status: 'sent'
-        }
-      ]
-    };
-
-    return { success: true, data: newConv };
+    // Backend owns assignment. It currently ignores an explicitly selected agent.
+    const res = await apiRequest<any>('/support/conversations', { method: 'POST', body: JSON.stringify({}) });
+    if (!res.success || !res.data?.id) return { success: false, error: res.error || 'Could not create conversation.' };
+    return { success: true, message: res.message,
+      data: this.normalizeConversation(res.data, payload) };
   }
 
-  /**
-   * POST /api/support/conversations/:id/messages
-   * Persists a chat message or voice note to PostgreSQL.
-   */
-  static async sendMessage(
-    conversationId: string,
-    message: SupportMessage
-  ): Promise<ApiResponse<SupportMessage>> {
-    const res = await apiRequest<SupportMessage>(`/support/conversations/${conversationId}/messages`, {
-      method: 'POST',
-      body: JSON.stringify(message)
-    });
+  static async getConversations(context: {
+    customerId: string; customerName: string; customerTier: string; staffList: SupportAgent[];
+  }): Promise<ApiResponse<SupportConversation[]>> {
+    const res = await apiRequest<any[]>('/support/conversations');
+    if (!res.success || !Array.isArray(res.data)) return { success: false, error: res.error || 'Could not load conversations.' };
+    return { success: true, data: res.data.map((raw) => this.normalizeConversation(raw, context)) };
+  }
 
-    if (res.success && res.data) return res;
-    return { success: true, data: message };
+  static async getMessages(conversationId: string): Promise<ApiResponse<SupportMessage[]>> {
+    const res = await apiRequest<any[]>(`/support/conversations/${conversationId}/messages`);
+    if (!res.success || !Array.isArray(res.data)) return { success: false, error: res.error || 'Could not load messages.' };
+    return { success: true, data: res.data.map((raw) => this.normalizeMessage(raw, conversationId)) };
+  }
+
+  /** Backend persists then publishes `message:new` to Ably. No mock-success fallback. */
+  static async sendMessage(conversationId: string, message: SupportMessage): Promise<ApiResponse<SupportMessage>> {
+    const res = await apiRequest<any>(`/support/conversations/${conversationId}/messages`, {
+      method: 'POST', body: JSON.stringify({ content: message.text })
+    });
+    if (!res.success || !res.data?.id) return { success: false, error: res.error || 'Message was not saved.' };
+    return { success: true, data: this.normalizeMessage(res.data, conversationId) };
   }
 
   /**

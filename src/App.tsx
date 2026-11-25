@@ -11,8 +11,6 @@ import {
   INITIAL_STATEMENTS,
   INITIAL_SESSIONS,
   USER_PROFILE,
-  SUPPORT_STAFF_LIST,
-  INITIAL_SUPPORT_CONVERSATIONS,
   INITIAL_TICKETS
 } from './data/mockData';
 import {
@@ -50,6 +48,7 @@ import { UserProfileModal } from './components/UserProfileModal';
 import { AuthService } from './services/authService';
 import { BankingService } from './services/bankingService';
 import { SupportService } from './services/supportService';
+import { getSupportStaffDirectory } from './services/supportStaffDirectoryService';
 import { realtimeClient } from './services/realtimeClient';
 import { AuthUser } from './types/auth';
 import { CheckCircle2, Menu, X, Sun, Moon, LogOut } from 'lucide-react';
@@ -95,9 +94,9 @@ export default function App() {
     showToast(`Switched to ${next === 'light' ? 'Executive Slate Light' : 'Obsidian Dark'} theme`);
   };
 
-  const [supportUnreadCount, setSupportUnreadCount] = useState<number>(2);
-  const [staffList, setStaffList] = useState<SupportAgent[]>(SUPPORT_STAFF_LIST);
-  const [supportConversations, setSupportConversations] = useState<SupportConversation[]>(INITIAL_SUPPORT_CONVERSATIONS);
+  const [supportUnreadCount, setSupportUnreadCount] = useState<number>(0);
+  const [staffList, setStaffList] = useState<SupportAgent[]>([]);
+  const [supportConversations, setSupportConversations] = useState<SupportConversation[]>([]);
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>(INITIAL_TICKETS);
 
   // Existing Supabase authentication and session-restoration flow is preserved.
@@ -105,6 +104,23 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  // Backend-backed customer inbox. Never substitute simulated conversations.
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    let cancelled = false;
+    void SupportService.getConversations({
+      customerId: currentUser.id,
+      customerName: `${currentUser.firstName || ''} ${currentUser.lastName || ''}`.trim() || 'Private Client',
+      customerTier: currentUser.clientTier || 'STANDARD',
+      staffList,
+    }).then((response) => {
+      if (cancelled) return;
+      if (response.success && response.data) setSupportConversations(response.data);
+      else console.error('Could not load customer support inbox:', response.error);
+    });
+    return () => { cancelled = true; };
+  }, [currentUser?.id, staffList]);
+
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
 
   useEffect(() => {
@@ -213,9 +229,9 @@ const customer = await AuthService.getCurrentUser();
   useEffect(() => {
     const fetchServerData = async () => {
       try {
-        const [bankRes, supportRes] = await Promise.all([
+        const [bankRes, staffRes] = await Promise.all([
           BankingService.getDashboard(),
-          SupportService.getDashboard()
+          getSupportStaffDirectory()
         ]);
 
         if (bankRes.success && bankRes.data) {
@@ -228,10 +244,12 @@ const customer = await AuthService.getCurrentUser();
           if (bankRes.data.sessions) setSessions(bankRes.data.sessions);
         }
 
-        if (supportRes.success && supportRes.data) {
-          if (supportRes.data.staffList) setStaffList(supportRes.data.staffList);
-          if (supportRes.data.conversations) setSupportConversations(supportRes.data.conversations);
-          if (supportRes.data.tickets) setSupportTickets(supportRes.data.tickets);
+        if (staffRes.success && staffRes.data) {
+          setStaffList(staffRes.data);
+        } else {
+          // Never display fabricated staff if the real API is unavailable.
+          setStaffList([]);
+          console.error('Could not load real staff directory:', staffRes.error);
         }
       } catch (err) {
         console.error('Initial dashboard sync error:', err);
